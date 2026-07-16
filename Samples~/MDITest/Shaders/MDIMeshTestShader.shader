@@ -46,7 +46,10 @@ Shader "Hidden/MDIMeshTest"
             {
                 InitIndirectDrawArgs(0);
 
-                #if defined(SHADER_API_VULKAN)
+                // Vulkan / WebGPU: SV_InstanceID already includes the indirect
+                // args' startInstance (see GetIndirectInstanceID_Base in
+                // UnityIndirect.cginc) — adding it again would double the offset.
+                #if defined(SHADER_API_VULKAN) || defined(SHADER_API_WEBGPU)
                 uint globalInstanceID = svInstanceID;
                 #else
                 uint globalInstanceID = (globalIndirectDrawArgs.startInstance + svInstanceID);

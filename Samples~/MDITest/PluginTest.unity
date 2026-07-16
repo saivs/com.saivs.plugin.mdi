@@ -367,7 +367,7 @@ GameObject:
   - component: {fileID: 116591790}
   - component: {fileID: 116591789}
   m_Layer: 5
-  m_Name: Set Target FPS60 Button
+  m_Name: Set Target FPS120 Button
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -439,7 +439,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 866735225}
         m_TargetAssemblyTypeName: Saivs.Graphics.Test.MDITestController, Saivs.Graphics.Test
-        m_MethodName: SetMaxFps60
+        m_MethodName: SetMaxFps120
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -839,7 +839,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "Set TargetFPS \n30"
+  m_text: "Set TargetFPS \n60"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -976,7 +976,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "Set TargetFPS \n120"
+  m_text: "Set TargetFPS \n500"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -1113,7 +1113,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "Set TargetFPS \n60"
+  m_text: "Set TargetFPS \n120"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -1484,7 +1484,7 @@ GameObject:
   - component: {fileID: 1522904309}
   - component: {fileID: 1522904308}
   m_Layer: 5
-  m_Name: Set Target FPS30 Button
+  m_Name: Set Target FPS60 Button
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1556,7 +1556,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 866735225}
         m_TargetAssemblyTypeName: Saivs.Graphics.Test.MDITestController, Saivs.Graphics.Test
-        m_MethodName: SetMaxFps30
+        m_MethodName: SetMaxFps60
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -1617,7 +1617,7 @@ GameObject:
   - component: {fileID: 1663056735}
   - component: {fileID: 1663056734}
   m_Layer: 5
-  m_Name: Set Target FPS120 Button
+  m_Name: Set Target FPS500 Button
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1689,7 +1689,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 866735225}
         m_TargetAssemblyTypeName: Saivs.Graphics.Test.MDITestController, Saivs.Graphics.Test
-        m_MethodName: SetMaxFps120
+        m_MethodName: SetMaxFps500
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}

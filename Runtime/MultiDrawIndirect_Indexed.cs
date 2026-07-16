@@ -130,7 +130,10 @@ namespace Saivs.Graphics.Core.MDI
                         shaderPass: shaderPass, topology: topology, bufferWithArgs: _dummyArgsBuffer,
                         argsOffset: slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties: properties);
 
-                cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
+                // WebGPU: no native render-event callback — the jslib backend
+                // intercepts the prime draw itself and reads the ring directly.
+                if (_renderEventAndDataFunc != IntPtr.Zero)
+                    cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
             }
             else
             {
