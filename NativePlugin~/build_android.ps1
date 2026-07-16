@@ -79,7 +79,9 @@ foreach ($a in $Abi) {
         "-DANDROID_PLATFORM=android-$ApiLevel" `
         "-DANDROID_STL=c++_shared" `
         "-DCMAKE_BUILD_TYPE=$Config" `
-        "-DCMAKE_MAKE_PROGRAM=$ninjaExe"
+        "-DCMAKE_MAKE_PROGRAM=$ninjaExe" `
+        "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON" `
+        "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384,-z,common-page-size=16384"
     if ($LASTEXITCODE -ne 0) { throw "Configure failed for $a" }
 
     Write-Host "`n=== Build: $a ==="
