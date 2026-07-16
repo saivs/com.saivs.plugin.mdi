@@ -42,7 +42,8 @@ namespace Saivs.Graphics.Core.MDI
                         shaderPass: shaderPass, topology: topology, bufferWithArgs: _dummyArgsBuffer,
                         argsOffset: slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties: properties);
 
-                cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
+                if (_renderEventAndDataFunc != IntPtr.Zero)
+                    cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
             }
             else
             {
@@ -84,7 +85,8 @@ namespace Saivs.Graphics.Core.MDI
                         shaderPass: shaderPass, topology: topology, bufferWithArgs: _dummyArgsBuffer,
                         argsOffset: slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties: properties);
 
-                cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
+                if (_renderEventAndDataFunc != IntPtr.Zero)
+                    cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
             }
             else
             {

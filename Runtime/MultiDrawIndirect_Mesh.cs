@@ -116,7 +116,8 @@ namespace Saivs.Graphics.Core.MDI
                 cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
                     _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
 
-                cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
+                if (_renderEventAndDataFunc != IntPtr.Zero)
+                    cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
             }
             else
             {
