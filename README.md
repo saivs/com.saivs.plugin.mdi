@@ -33,11 +33,11 @@ This plugin solves the problem by injecting a single native MDI command directly
 | OpenGL Core | ✅ Supported | `glMultiDrawElementsIndirect` |
 | OpenGL ES 3.1+ | ✅ Supported | `glMultiDrawElementsIndirect` |
 | Metal | ✅ Supported | `drawIndexedPrimitives:indirectBuffer:` via Objective-C method swizzling |
-| WebGPU (Web) | ✅ Supported | Cached `GPURenderBundle` replay (or `multiDrawIndexedIndirect` where available) via JS prototype interception, pure `.jslib` |
+| WebGPU | ✅ Supported | Cached `GPURenderBundle` replay (or `multiDrawIndexedIndirect` where available) via JS prototype interception, pure `.jslib` |
 
 ## Performance
 
-CPU time comparison for **25,000 draw calls**. D3D11/D3D12/Vulkan/OpenGL ES tested on RTX 3080, AMD Ryzen 9 5950X; Metal tested on Apple M2 Pro (Mac mini).
+CPU time comparison for **25,000 draw calls**. D3D11/D3D12/Vulkan/OpenGL ES/WebGPU tested on RTX 3080, AMD Ryzen 9 5950X; Metal tested on Apple M2 Pro (Mac mini).
 Measured as total `PlayerLoop` time (not just command submission) in the build, so the numbers include all engine overhead per frame:
 
 ### D3D11
@@ -79,6 +79,14 @@ Measured as total `PlayerLoop` time (not just command submission) in the build, 
 | **MultiDrawIndirect** | 1.52 ms |
 | ProceduralIndirect Loop | 23.06 ms |
 | RenderPrimitivesIndexedIndirect | 18.43 ms |
+
+### WebGPU
+
+| Method | CPU Time |
+|---|---|
+| **MultiDrawIndirect** | 5.25 ms |
+| ProceduralIndirect Loop | 53.00 ms |
+| RenderPrimitivesIndexedIndirect | 31.12 ms |
 
 ## Limitations
 
