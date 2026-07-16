@@ -94,6 +94,18 @@ if (WIN32)
     target_link_libraries(GfxPluginMDI PRIVATE d3d11 d3d12 dxgi)
 endif()
 
+if (UNIX AND NOT APPLE AND NOT ANDROID)
+    # Desktop Linux: Unity loads libGfxPluginMDI.so via DllImport("GfxPluginMDI").
+    # CMAKE_DL_LIBS is needed for dlopen/dlsym on glibc < 2.34.
+    target_link_libraries(GfxPluginMDI PRIVATE ${CMAKE_DL_LIBS})
+    target_compile_options(GfxPluginMDI PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+    # Static C++ runtime — the .so must not depend on the system libstdc++ version.
+    # --exclude-libs,ALL keeps the statically linked libstdc++/libgcc symbols private.
+    target_link_options(GfxPluginMDI PRIVATE
+        -static-libstdc++ -static-libgcc
+        -Wl,--exclude-libs,ALL -Wl,--no-undefined)
+endif()
+
 if (ANDROID)
     # Unity loads Android native plugins as libGfxPluginMDI.so per ABI.
     # Vulkan/GLES backends are header-only — symbols are resolved at runtime via

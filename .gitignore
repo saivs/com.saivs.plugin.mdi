@@ -83,3 +83,4 @@ crashlytics-build.properties
 # Native plugin build output
 NativePlugin~/build/
 NativePlugin~/build_macos/
+NativePlugin~/build_linux/

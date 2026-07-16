@@ -43,22 +43,56 @@ static void* GLGetProcAddress(const char* name)
 #else
 #include <dlfcn.h>
 
-// On Android / Linux, use eglGetProcAddress
+// On Android, use eglGetProcAddress. On desktop Linux (OpenGLCore via GLX),
+// use glXGetProcAddress from libGL — Unity's GL context there is GLX-based,
+// so EGL may be absent or resolve nothing.
 static void* GLGetProcAddress(const char* name)
 {
-    // Try eglGetProcAddress
-    typedef void (*(*PFN_eglGetProcAddress)(const char*))();
-    static PFN_eglGetProcAddress eglGetProc = nullptr;
+    typedef void (*(*PFN_getProcAddress)(const char*))();
+
+    // Try eglGetProcAddress (Android, Wayland/EGL desktops)
+    static PFN_getProcAddress eglGetProc = nullptr;
     static bool resolved = false;
     if (!resolved)
     {
         resolved = true;
         void* libEGL = dlopen("libEGL.so", RTLD_LAZY);
+#if !defined(__ANDROID__)
+        if (!libEGL)
+            libEGL = dlopen("libEGL.so.1", RTLD_LAZY);
+#endif
         if (libEGL)
-            eglGetProc = (PFN_eglGetProcAddress)dlsym(libEGL, "eglGetProcAddress");
+            eglGetProc = (PFN_getProcAddress)dlsym(libEGL, "eglGetProcAddress");
     }
     if (eglGetProc)
-        return (void*)eglGetProc(name);
+    {
+        if (void* proc = (void*)eglGetProc(name))
+            return proc;
+    }
+
+#if !defined(__ANDROID__)
+    // Desktop Linux fallback: glXGetProcAddress from libGL (GLX context)
+    static PFN_getProcAddress glxGetProc = nullptr;
+    static bool glxResolved = false;
+    if (!glxResolved)
+    {
+        glxResolved = true;
+        void* libGL = dlopen("libGL.so.1", RTLD_LAZY);
+        if (!libGL)
+            libGL = dlopen("libGL.so", RTLD_LAZY);
+        if (libGL)
+        {
+            glxGetProc = (PFN_getProcAddress)dlsym(libGL, "glXGetProcAddressARB");
+            if (!glxGetProc)
+                glxGetProc = (PFN_getProcAddress)dlsym(libGL, "glXGetProcAddress");
+        }
+    }
+    if (glxGetProc)
+    {
+        if (void* proc = (void*)glxGetProc(name))
+            return proc;
+    }
+#endif
 
     // Fallback: try libGLESv2.so directly
     static void* libGLES = nullptr;
