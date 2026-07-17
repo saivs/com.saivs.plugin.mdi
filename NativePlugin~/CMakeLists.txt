@@ -117,8 +117,13 @@ if (ANDROID)
     target_link_libraries(GfxPluginMDI PRIVATE log android c++_shared)
     # Hide non-exported symbols and strip — keeps the .so small.
     target_compile_options(GfxPluginMDI PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
+    # 16 KB ELF segment alignment. Android is moving from 4 KB to 16 KB memory
+    # pages (Pixel 8+, Android 15+; required by Google Play for API 35+ updates).
+    # A 4 KB-aligned .so is REJECTED by the loader on 16 KB-page devices, so the
+    # plugin would fail to load there. 16 KB alignment loads on both page sizes.
+    # Kept here (not only in build_android.ps1) so a direct CMake build is safe too.
     set_target_properties(GfxPluginMDI PROPERTIES
-        LINK_FLAGS "-Wl,--build-id=none -Wl,--gc-sections -Wl,--strip-all"
+        LINK_FLAGS "-Wl,--build-id=none -Wl,--gc-sections -Wl,--strip-all -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
     )
 endif()
 
