@@ -27,9 +27,20 @@ namespace Saivs.Graphics.Core.MDI
     /// </summary>
     public static partial class MultiDrawIndirect
     {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // Web builds link statically; the MDI_* symbols come from
+        // Plugins/WebGL/MDIBackend_WebGPU.jslib.
+        private const string DLL_NAME = "__Internal";
+#else
         private const string DLL_NAME = "GfxPluginMDI";
+#endif
         private const int INDIRECT_DRAW_INDEXED_ARGS_SIZE = 20; // 5 * sizeof(uint)
         private const int MAX_PENDING = 256;
+
+        // Written into NativeMDIParams._pad. Native backends ignore it; the
+        // WebGPU jslib backend uses it to validate ring slots when it
+        // intercepts prime draws (must match MAGIC in MDIBackend_WebGPU.jslib).
+        private const uint MDI_RING_MAGIC = 0x4D444921;
 
         // MDIParams flags — must match MDI_FLAG_* in MDIBackend.h.
         private const uint MDI_FLAG_MESH_PATH = 1u << 0;
@@ -283,7 +294,7 @@ namespace Saivs.Graphics.Core.MDI
                 indexFormat = indexFormat,
                 topology = (uint)topology,
                 flags = flags,
-                _pad = 0,
+                _pad = MDI_RING_MAGIC,
             };
 
             return (IntPtr)((NativeMDIParams*)_paramsRing.GetUnsafeReadOnlyPtr() + slot);

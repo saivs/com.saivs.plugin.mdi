@@ -157,7 +157,9 @@ Shader "Hidden/MDIIndexedTest"
 
             VertexOutput vert(uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
             {
-                #if defined(SHADER_API_VULKAN)
+                // Vulkan / WebGPU: SV_InstanceID already includes the indirect
+                // args' startInstance — adding it again would double the offset.
+                #if defined(SHADER_API_VULKAN) || defined(SHADER_API_WEBGPU)
                 uint globalInstanceID = instanceID;
                 #else
                 uint globalInstanceID = _ArgsBuffer[_DrawCallIndex].startInstance + instanceID;
@@ -215,7 +217,9 @@ Shader "Hidden/MDIIndexedTest"
 
             VertexOutput vert(MeshAttributes input, uint instanceID : SV_InstanceID)
             {
-                #if defined(SHADER_API_VULKAN)
+                // Vulkan / WebGPU: SV_InstanceID already includes the indirect
+                // args' startInstance — adding it again would double the offset.
+                #if defined(SHADER_API_VULKAN) || defined(SHADER_API_WEBGPU)
                 uint globalInstanceID = instanceID;
                 #else
                 uint globalInstanceID = _ArgsBuffer[_DrawCallIndex].startInstance + instanceID;

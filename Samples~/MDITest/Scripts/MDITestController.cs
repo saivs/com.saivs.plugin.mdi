@@ -57,9 +57,9 @@ namespace Saivs.Graphics.Test
                 NextDrawMode();
             }
         }
-        public void SetMaxFps30()
+        public void SetMaxFps500()
         {
-            Application.targetFrameRate = 30;
+            Application.targetFrameRate = 500;
         }
 
         public void SetMaxFps60()
