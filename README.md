@@ -33,7 +33,7 @@ This plugin solves the problem by injecting a single native MDI command directly
 | OpenGL Core | ✅ Supported | `glMultiDrawElementsIndirect` |
 | OpenGL ES 3.1+ | ✅ Supported | `glMultiDrawElementsIndirect` |
 | Metal | ✅ Supported | `drawIndexedPrimitives:indirectBuffer:` via Objective-C method swizzling |
-| WebGPU | ✅ Supported | Cached `GPURenderBundle` replay (or `multiDrawIndexedIndirect` where available [Unsafe WebGPU Support](browser://flags/#enable-unsafe-webgpu)) via JS prototype interception, pure `.jslib` |
+| WebGPU | ✅ Supported | Cached `GPURenderBundle` replay (or `multiDrawIndexedIndirect` where available (see `chrome://flags/#enable-unsafe-webgpu`)) via JS prototype interception, pure `.jslib` |
 
 ### Operating Systems
 
