@@ -35,6 +35,20 @@ This plugin solves the problem by injecting a single native MDI command directly
 | Metal | ✅ Supported | `drawIndexedPrimitives:indirectBuffer:` via Objective-C method swizzling |
 | WebGPU | ✅ Supported | Cached `GPURenderBundle` replay (or `multiDrawIndexedIndirect` where available) via JS prototype interception, pure `.jslib` |
 
+### Operating Systems
+
+The package ships prebuilt binaries for every supported OS — no manual compilation needed:
+
+| OS | Binary | Graphics APIs |
+|---|---|---|
+| Windows x86_64 | `GfxPluginMDI.dll` | D3D11, D3D12, Vulkan, OpenGL |
+| Linux x86_64 | `libGfxPluginMDI.so` | Vulkan, OpenGL |
+| macOS (Intel + Apple Silicon) | `GfxPluginMDI.bundle` | Metal |
+| Android (arm64-v8a, armeabi-v7a) | `libGfxPluginMDI.so` | Vulkan, OpenGL ES |
+| Web | `MDIBackend_WebGPU.jslib` | WebGPU |
+
+The Linux binary targets glibc 2.34+ (Ubuntu 22.04 and newer — Unity 6's Linux baseline) with the C++ runtime linked statically, so it has no dependencies beyond libc. To rebuild it from source, run `NativePlugin~/build_linux.sh` on any Linux machine or container.
+
 ## Performance
 
 CPU time comparison for **25,000 draw calls**. D3D11/D3D12/Vulkan/OpenGL ES/WebGPU tested on RTX 3080, AMD Ryzen 9 5950X; Metal tested on Apple M2 Pro (Mac mini).
@@ -92,7 +106,8 @@ Measured as total `PlayerLoop` time (not just command submission) in the build, 
 
 - **D3D11 + RenderDoc**: The plugin uses NvAPI, which can cause Unity to crash when RenderDoc attempts to inject at runtime. To avoid this, attach RenderDoc **at Unity startup** (launch Unity from RenderDoc) rather than connecting mid-session.
 - **D3D11 + AMD GPUs**: D3D11 does not have a native MDI API. On NVIDIA, this is solved via NvAPI, which can attach to an already-created D3D11 device. AMD has an equivalent extension in AGS (`agsDriverExtensionsDX11_MultiDrawIndexedInstancedIndirect`), but AGS requires the D3D11 device to be created through `agsDriverExtensionsDX11_CreateDevice` — since Unity creates the device itself, AGS extensions cannot be enabled retroactively. Because of this (and lack of AMD hardware for testing), MDI on D3D11 + AMD is not currently supported. AMD GPUs are fully supported under D3D12, Vulkan, and OpenGL.
-- **Consoles & mobile devices**: The plugin has been tested on desktop Windows, macOS, and Web (WebGPU in Chromium-based browsers). It has not been verified on consoles (PlayStation, Xbox, Switch) or mobile devices — support on these platforms is not guaranteed.
+- **Consoles**: The plugin has been tested on desktop Windows, Linux, macOS, Web (WebGPU in Chromium-based browsers), and mobile devices (iOS; Android with Adreno and Mali GPUs). It has not been verified on consoles (PlayStation, Xbox, Switch) — support there is not guaranteed.
+- **Mobile hardware multi-draw coverage**: On iOS, Metal indirect draws (the mechanism behind the swizzling backend) require A9 hardware or newer (iPhone 6s, 2015+). On Android, true hardware MDI depends on the GPU's Vulkan `multiDrawIndirect` feature: **Qualcomm Adreno** exposes it, while **ARM Mali** generally does not (only the newest Immortalis-class drivers report it). The same split applies under OpenGL ES: `GL_EXT_multi_draw_indirect` is available on Adreno but not on Mali. On GPUs without the feature nothing breaks — the plugin detects it at init and transparently degrades to a **native loop** (`vkCmdDrawIndexedIndirect` with `drawCount = 1` per command, recorded directly into Unity's command buffer): still one plugin event per batch and far cheaper than the managed C# loop, just not a single hardware command.
 - **Identity buffer instance limit (D3D11/D3D12/OpenGL/GLES)**: The per-instance identity buffer defaults to 65,536 entries. For any draw command in an MDI batch, `startInstance + instanceCount` must not exceed this value. Use `MultiDrawIndirect.MaxInstanceCount` to increase or decrease the limit at runtime. This limitation does not apply to Vulkan.
 
 ## Installation
