@@ -123,9 +123,9 @@ namespace Saivs.Graphics.Core.MDI
                     mesh.GetTopology(0),
                     EncodeIndexFormat(mesh.indexFormat),
                     flags: MDI_FLAG_MESH_PATH | MDI_FLAG_GPU_COUNT,
+                    slot: out int slot,
                     countBuffer: drawCountBuffer,
-                    countOffsetBytes: drawCountStartIndex,
-                    out int slot);
+                    countOffsetBytes: drawCountStartIndex);
 
                 cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
                     _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
@@ -169,9 +169,9 @@ namespace Saivs.Graphics.Core.MDI
                     mesh.GetTopology(0),
                     EncodeIndexFormat(mesh.indexFormat),
                     flags: MDI_FLAG_MESH_PATH | MDI_FLAG_GPU_COUNT,
+                    slot: out int slot,
                     countBuffer: drawCountBuffer,
-                    countOffsetBytes: drawCountStartIndex,
-                    out int slot);
+                    countOffsetBytes: drawCountStartIndex);
 
                 cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
                     _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
