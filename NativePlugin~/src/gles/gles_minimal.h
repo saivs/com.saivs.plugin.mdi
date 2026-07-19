@@ -60,6 +60,14 @@ typedef void (GL_APIENTRY *PFNGLMULTIDRAWELEMENTSINDIRECTEXTPROC)(
     GLenum mode, GLenum type, const void* indirect,
     GLsizei drawcount, GLsizei stride);
 
+// glMultiDrawElementsIndirectCount — GL 4.6 core / GL_ARB_indirect_parameters.
+// The draw count is read from the buffer bound to GL_PARAMETER_BUFFER at
+// byte offset `drawcount`, clamped to `maxdrawcount`.
+#define GL_PARAMETER_BUFFER           0x80EE
+typedef void (GL_APIENTRY *PFNGLMULTIDRAWELEMENTSINDIRECTCOUNTPROC)(
+    GLenum mode, GLenum type, const void* indirect,
+    GLintptr drawcount, GLsizei maxdrawcount, GLsizei stride);
+
 // glBindBuffer
 typedef void (GL_APIENTRY *PFNGLBINDBUFFERPROC)(GLenum target, GLuint buffer);
 

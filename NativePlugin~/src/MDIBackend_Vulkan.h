@@ -20,6 +20,7 @@ public:
 private:
     IUnityGraphicsVulkanV2* _vulkan = nullptr;
     PFN_vkCmdDrawIndexedIndirect _vkCmdDrawIndexedIndirect = nullptr;
+    PFN_vkCmdDrawIndexedIndirectCount _vkCmdDrawIndexedIndirectCount = nullptr;
     bool _initialized = false;
     bool _multiDrawIndirectSupported = false;
 };

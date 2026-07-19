@@ -146,5 +146,61 @@ namespace Saivs.Graphics.Core.MDI
                 }
             }
         }
+
+        public static void MultiDrawIndexedIndirect(
+            this CommandBuffer cmd,
+            GraphicsBuffer indexBuffer,
+            Material material,
+            MaterialPropertyBlock properties,
+            int shaderPass,
+            MeshTopology topology,
+            GraphicsBuffer bufferWithArgs,
+            int argsStartIndex,
+            GraphicsBuffer drawCountBuffer, // Buffer updated dynamically by GPU compute
+            int drawCountStartIndex, // Byte offset inside count buffer (usually 0)
+            int maxDrawCount // Fallback upper-bound limit for the hardware loop
+        )
+        {
+            EnsureInitialized();
+
+            if (_supported && maxDrawCount > 0)
+            {
+                // Same flow as the CPU-count overload: stage params (including
+                // the GPU count buffer) into the ring, then issue the prime
+                // draw + plugin event. Backends with native count support
+                // (D3D12 ExecuteIndirect, vkCmdDrawIndexedIndirectCount,
+                // glMultiDrawElementsIndirectCount, WebGPU multi-draw) read the
+                // draw count from the GPU buffer; backends without it execute
+                // maxDrawCount draws — unused args entries must then be zeroed
+                // (instanceCount = 0) by the compute shader.
+                IntPtr dataPtr = WriteParams(bufferWithArgs, indexBuffer, argsStartIndex, maxDrawCount, topology, indexFormat: 1, flags: MDI_FLAG_GPU_COUNT, out int slot,
+                    countBuffer: drawCountBuffer, countOffsetBytes: drawCountStartIndex);
+
+                if (UsesPerInstanceVB)
+                    cmd.DrawMesh(GetPrimeMesh(topology), Matrix4x4.identity, material, 0, shaderPass, properties);
+                else
+                    cmd.DrawProceduralIndirect(
+                        indexBuffer: indexBuffer, matrix: Matrix4x4.identity, material: material,
+                        shaderPass: shaderPass, topology: topology, bufferWithArgs: _dummyArgsBuffer,
+                        argsOffset: slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties: properties);
+
+                if (_renderEventAndDataFunc != IntPtr.Zero)
+                    cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
+            }
+            else
+            {
+                // Fallback: the GPU count can't be read without native support —
+                // draw the upper bound; unused args entries must have
+                // instanceCount = 0 so the extra draws produce nothing.
+                for (int i = 0; i < maxDrawCount; i++)
+                {
+                    cmd.DrawProceduralIndirect(
+                        indexBuffer: indexBuffer, matrix: Matrix4x4.identity, material: material,
+                        shaderPass: shaderPass, topology: topology, bufferWithArgs: bufferWithArgs,
+                        argsOffset: (argsStartIndex + i) * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties: properties);
+                }
+            }
+        }
+
     }
 }

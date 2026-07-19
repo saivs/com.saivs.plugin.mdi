@@ -792,13 +792,20 @@ void MDIBackend_D3D12::ExecuteMDI(const MDIParams& params)
             break;
     }
 
-    // Single ExecuteIndirect — true multi-draw indirect
+    // Single ExecuteIndirect — true multi-draw indirect. With MDI_FLAG_GPU_COUNT
+    // the GPU reads the actual draw count from the count buffer (maxDrawCount
+    // acts as the upper bound, per the D3D12 count-buffer contract).
+    ID3D12Resource* countResource = nullptr;
+    if ((params.flags & MDI_FLAG_GPU_COUNT) && params.countBuffer)
+        countResource = static_cast<ID3D12Resource*>(params.countBuffer);
+
     cmdList->ExecuteIndirect(
         _cmdSignature,
         params.maxDrawCount,
         argsResource,
         params.argsOffsetBytes,
-        nullptr, 0);
+        countResource,
+        countResource ? params.countOffsetBytes : 0);
 
     static uint32_t s_callCount = 0;
     s_callCount++;

@@ -158,3 +158,12 @@ typedef void (VKAPI_PTR *PFN_vkCmdDrawIndexedIndirect)(
     VkDeviceSize offset,
     uint32_t drawCount,
     uint32_t stride);
+
+typedef void (VKAPI_PTR *PFN_vkCmdDrawIndexedIndirectCount)(
+    VkCommandBuffer commandBuffer,
+    VkBuffer buffer,
+    VkDeviceSize offset,
+    VkBuffer countBuffer,
+    VkDeviceSize countBufferOffset,
+    uint32_t maxDrawCount,
+    uint32_t stride);

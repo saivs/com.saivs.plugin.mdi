@@ -46,6 +46,18 @@ bool MDIBackend_Vulkan::Initialize(IUnityInterfaces* unityInterfaces)
         return false;
     }
 
+    // Optional: GPU-driven draw count (core 1.2, or KHR/AMD extension).
+    _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+        getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCount"));
+    if (!_vkCmdDrawIndexedIndirectCount)
+        _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+            getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountKHR"));
+    if (!_vkCmdDrawIndexedIndirectCount)
+        _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+            getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountAMD"));
+    DebugLog("[MDI] Vulkan drawIndexedIndirectCount: %s\n",
+        _vkCmdDrawIndexedIndirectCount ? "supported" : "NOT supported (GPU count will use maxDrawCount)");
+
     // Query multiDrawIndirect support from the physical device.
     // vkCmdDrawIndexedIndirect with drawCount > 1 requires this feature.
     // Without it, drawCount must be 0 or 1 (Vulkan spec).
@@ -102,6 +114,7 @@ void MDIBackend_Vulkan::Shutdown()
 {
     _vulkan = nullptr;
     _vkCmdDrawIndexedIndirect = nullptr;
+    _vkCmdDrawIndexedIndirectCount = nullptr;
     _initialized = false;
     _multiDrawIndirectSupported = false;
     DebugLog("[MDI] Vulkan backend shutdown\n");
@@ -130,6 +143,24 @@ void MDIBackend_Vulkan::ExecuteMDI(const MDIParams& params)
         return;
     }
 
+    // Resolve the GPU count buffer the same way, before querying recording state.
+    const bool useGpuCount = (params.flags & MDI_FLAG_GPU_COUNT) != 0 &&
+                             params.countBuffer != nullptr &&
+                             _vkCmdDrawIndexedIndirectCount != nullptr;
+    UnityVulkanBuffer vkCountBuffer = {};
+    bool countResolved = false;
+    if (useGpuCount)
+    {
+        countResolved = _vulkan->AccessBuffer(
+            params.countBuffer,
+            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+            VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+            kUnityVulkanResourceAccess_PipelineBarrier,
+            &vkCountBuffer);
+        if (!countResolved)
+            DebugLog("[MDI] Vulkan: AccessBuffer failed for count buffer, using maxDrawCount\n");
+    }
+
     // AccessBuffer invalidates the recording state — must re-query
     UnityVulkanRecordingState state = {};
     if (!_vulkan->CommandRecordingState(&state, kUnityVulkanGraphicsQueueAccess_DontCare))
@@ -148,7 +179,21 @@ void MDIBackend_Vulkan::ExecuteMDI(const MDIParams& params)
 
     const uint32_t stride = 20; // 5 * sizeof(uint32_t) = IndirectDrawIndexedArgs
 
-    if (_multiDrawIndirectSupported)
+    if (useGpuCount && countResolved)
+    {
+        // GPU-driven draw count: hardware reads the actual count from the
+        // count buffer, clamped to maxDrawCount.
+        _vkCmdDrawIndexedIndirectCount(
+            state.commandBuffer,
+            vkArgsBuffer.buffer,
+            static_cast<VkDeviceSize>(params.argsOffsetBytes),
+            vkCountBuffer.buffer,
+            static_cast<VkDeviceSize>(params.countOffsetBytes),
+            params.maxDrawCount,
+            stride
+        );
+    }
+    else if (_multiDrawIndirectSupported)
     {
         // Hardware multi-draw: single call with drawCount > 1
         _vkCmdDrawIndexedIndirect(

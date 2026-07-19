@@ -179,6 +179,9 @@ static void HookedDrawIndirect(id self, SEL _cmd,
 
                 id<MTLRenderCommandEncoder> renderEnc = (id<MTLRenderCommandEncoder>)self;
 
+                // Note: Metal has no GPU-count indirect draw API. With
+                // MDI_FLAG_GPU_COUNT we execute the maxDrawCount upper bound —
+                // unused args entries must have instanceCount = 0.
                 t_inDrawHook = true;
                 for (uint32_t i = 0; i < params.maxDrawCount; ++i)
                 {

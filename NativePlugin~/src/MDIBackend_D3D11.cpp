@@ -540,6 +540,11 @@ void MDIBackend_D3D11::ExecuteMDI(const MDIParams& params)
     auto* argsBuffer = static_cast<ID3D11Buffer*>(params.argsBuffer);
     constexpr uint32_t stride = 20;
 
+    // Note: D3D11 has no GPU-count draw API (neither NvAPI MDI nor the loop
+    // can read a count buffer). With MDI_FLAG_GPU_COUNT we execute the
+    // maxDrawCount upper bound — the compute shader must zero the
+    // instanceCount of unused args entries so extra draws produce nothing.
+
     // -------------------------------------------------------------------
     // Save IA state we're about to clobber. Unity tracks its own bound
     // state on D3D11; if we change IB / VB slot 15 / topology and don't
