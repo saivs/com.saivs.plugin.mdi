@@ -303,7 +303,10 @@ namespace Saivs.Graphics.Core.MDI
                 flags = flags,
                 _pad = MDI_RING_MAGIC,
                 countBuffer = countBuffer != null ? countBuffer.GetNativeBufferPtr() : IntPtr.Zero,
-                countOffsetBytes = (uint)countOffsetBytes,
+
+                // Bitwise AND with ~3u strips the lowest 2 bits,
+                // guaranteeing 4-byte (uint32) offset alignment for D3D12/Vulkan/GL hardware.
+                countOffsetBytes = (uint)(countOffsetBytes & ~3),
                 _pad2 = 0,
             };
 

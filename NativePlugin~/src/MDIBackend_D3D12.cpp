@@ -799,6 +799,37 @@ void MDIBackend_D3D12::ExecuteMDI(const MDIParams& params)
     if ((params.flags & MDI_FLAG_GPU_COUNT) && params.countBuffer)
         countResource = static_cast<ID3D12Resource*>(params.countBuffer);
 
+    // -------------------------------------------------------------------
+    // Transition args and count buffers from UAV to INDIRECT_ARGUMENT
+    // -------------------------------------------------------------------
+    D3D12_RESOURCE_BARRIER barriers[2] = {};
+    UINT barrierCount = 0;
+
+    if (argsResource)
+    {
+        barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+        barriers[barrierCount].Transition.pResource = argsResource;
+        barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+        barrierCount++;
+    }
+
+    if (countResource)
+    {
+        barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+        barriers[barrierCount].Transition.pResource = countResource;
+        barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+        barrierCount++;
+    }
+
+    if (barrierCount > 0)
+        cmdList->ResourceBarrier(barrierCount, barriers);
+
     cmdList->ExecuteIndirect(
         _cmdSignature,
         params.maxDrawCount,
