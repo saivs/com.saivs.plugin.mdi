@@ -7,6 +7,7 @@
 #include <d3d11shader.h>
 #include "MDILog.h"
 #include "InlineHook.h"
+#include "DxbcInputSignature.h"
 
 // -----------------------------------------------------------------------
 // PSO hook: inject per-instance TEXCOORD7 into graphics PSOs.
@@ -25,8 +26,16 @@ static constexpr uint32_t kInstanceVBSlot = 15;
 // -----------------------------------------------------------------------
 // VS bytecode reflection (shared logic with D3D11 backend).
 // d3dcompiler_47.dll loaded dynamically — ships with every Win10+; if it's
-// somehow missing, mesh-path augmentation is skipped (existing indexed-path
-// patching keeps working since it doesn't rely on reflection).
+// somehow missing, we fall back to the container parser in
+// DxbcInputSignature.h (existing indexed-path patching also keeps working
+// since it doesn't rely on reflection at all).
+//
+// Shader model 6 note: Unity ships DXIL for SM6+, and D3DReflect only
+// understands DXBC (SM <= 5.1), so it fails on every SM6 shader. DXIL
+// containers still carry an input-signature chunk, so the parser fallback
+// is what makes the TEXCOORD7 detection work under SM6. Without it,
+// VSInputHasTexcoord7 returned false for all SM6 VS bytecode and the
+// per-instance TEXCOORD7 element was never injected.
 // -----------------------------------------------------------------------
 
 static const GUID kIID_ID3D11ShaderReflection_v47 =
@@ -52,7 +61,7 @@ static void EnsureD3DCompilerLoaded()
             GetProcAddress(g_d3dCompilerModule, "D3DReflect"));
 
     DebugLog("[MDI] D3D12 D3DReflect: %s\n",
-             g_D3DReflect ? "loaded" : "NOT loaded (mesh-path augmentation disabled)");
+             g_D3DReflect ? "loaded" : "NOT loaded (using container-parser fallback)");
 }
 
 // Detects the MDI_INSTANCE_ID_PARAMETER marker: a TEXCOORD7 input declared as
@@ -64,19 +73,39 @@ static void EnsureD3DCompilerLoaded()
 static bool VSInputHasTexcoord7(const void* bytecode, SIZE_T size)
 {
     EnsureD3DCompilerLoaded();
-    if (!g_D3DReflect || !bytecode || size == 0)
+    if (!bytecode || size == 0)
         return false;
 
     // Quick DXBC magic check ('DXBC' as little-endian uint32 = 0x43425844).
     // Guards against fake bytecode pointers from heuristic stream scans.
+    // Note: DXIL (SM6) containers use this same fourCC, so passing this check
+    // does not imply the blob is reflectable by D3DReflect.
     if (size < 4 || *reinterpret_cast<const uint32_t*>(bytecode) != 0x43425844u)
         return false;
+
+    // Strict UINT32 match is preserved in the fallback to keep the
+    // false-positive risk identical to the reflection path below.
+    auto parseFallback = [&]() -> bool {
+        return MDIDxbc::InputSignatureHasSemantic(bytecode, size, "TEXCOORD", 7,
+                                                  /*requireUint32=*/true);
+    };
+
+    if (!g_D3DReflect)
+        return parseFallback();
 
     ID3D11ShaderReflection* refl = nullptr;
     HRESULT hr = g_D3DReflect(bytecode, size, kIID_ID3D11ShaderReflection_v47,
                               reinterpret_cast<void**>(&refl));
     if (FAILED(hr) || !refl)
-        return false;
+    {
+        // Expected for every SM6 shader (DXIL) and for signature-only blobs.
+        bool found = parseFallback();
+        static uint32_t s_fallbackCount = 0;
+        if (s_fallbackCount++ < 8)
+            DebugLog("[MDI] D3D12 D3DReflect failed hr=0x%08X size=%zu, container-parser found=%d\n",
+                     hr, size, found ? 1 : 0);
+        return found;
+    }
 
     D3D11_SHADER_DESC desc = {};
     refl->GetDesc(&desc);
@@ -764,6 +793,21 @@ void MDIBackend_D3D12::ExecuteMDI(const MDIParams& params)
     }
 
     // Bind per-instance identity VB to slot 15.
+    //
+    // NOTE (not fixed here): what the VS receives in TEXCOORD7 is the IA
+    // instance index, i.e. StartInstanceLocation + instanceIndex of the
+    // sub-draw — NOT the index of the draw argument within argsBuffer. There
+    // is no INCREMENTING_CONSTANT in _cmdSignature because that argument type
+    // requires the command signature to be created with an ID3D12RootSignature
+    // (and a matching root constant slot), which Unity owns and we don't have.
+    //
+    // If a shader needs the argument index, the compute shader that fills
+    // argsBuffer can write StartInstanceLocation = drawIndex (with
+    // InstanceCount = 1); the IA then fetches element drawIndex from this
+    // buffer and TEXCOORD7 becomes the argument index — no command signature
+    // or root signature change required. That also makes _maxInstanceCount
+    // the upper bound on draw count, so ResizeInstanceIDBuffer would need to
+    // be driven by params.maxDrawCount.
     if (_instanceIDBuffer)
     {
         D3D12_VERTEX_BUFFER_VIEW vbView = {};

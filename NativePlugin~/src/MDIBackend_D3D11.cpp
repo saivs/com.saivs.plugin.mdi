@@ -7,6 +7,7 @@
 #include <d3d11shader.h>
 #include "MDILog.h"
 #include "InlineHook.h"
+#include "DxbcInputSignature.h"
 
 // -----------------------------------------------------------------------
 // Input layout hook: patch TEXCOORD7 to per-instance on slot 15
@@ -70,68 +71,15 @@ static void EnsureD3DCompilerLoaded()
 // signature (ISGN / ISG1 chunk). Necessary because Unity often passes a
 // signature-only blob (from D3DGetInputSignatureBlob) to CreateInputLayout,
 // and D3DReflect rejects those with E_INVALIDARG — it needs the full SHEX
-// chunk. Reads the chunk table, locates ISGN/ISG1, walks fixed-size element
-// records, and looks up each semantic name in the chunk's name pool.
+// chunk. Implementation lives in DxbcInputSignature.h, shared with the D3D12
+// backend (which relies on it for shader model 6 / DXIL).
+//
+// requireUint32 is false here: fxc for D3D11 doesn't reliably report uint
+// inputs as UINT32, matching the reflection path's behaviour below.
 static bool ParseDxbcInputSignature_HasTexcoord7(const void* bytecode, SIZE_T size)
 {
-    if (!bytecode || size < 32) return false;
-    auto* data = static_cast<const uint8_t*>(bytecode);
-    if (data[0] != 'D' || data[1] != 'X' || data[2] != 'B' || data[3] != 'C')
-        return false;
-
-    // DXBC header: magic(4) + md5(16) + version(4) + totalSize(4) + chunkCount(4)
-    uint32_t totalSize  = *reinterpret_cast<const uint32_t*>(data + 24);
-    uint32_t chunkCount = *reinterpret_cast<const uint32_t*>(data + 28);
-    if (totalSize > size || chunkCount == 0 || chunkCount > 64) return false;
-    if (32u + chunkCount * 4u > size) return false;
-
-    auto* chunkOffsets = reinterpret_cast<const uint32_t*>(data + 32);
-
-    // ISGN = 'N','G','S','I' little-endian; ISG1 = '1','G','S','I'
-    constexpr uint32_t kISGN = 0x4E475349u;
-    constexpr uint32_t kISG1 = 0x31475349u;
-
-    for (uint32_t i = 0; i < chunkCount; ++i)
-    {
-        uint32_t off = chunkOffsets[i];
-        if (off + 8 > size) continue;
-
-        uint32_t fourCC    = *reinterpret_cast<const uint32_t*>(data + off);
-        uint32_t chunkSize = *reinterpret_cast<const uint32_t*>(data + off + 4);
-        if (off + 8 + chunkSize > size) continue;
-        if (fourCC != kISGN && fourCC != kISG1) continue;
-
-        auto* chunkData = data + off + 8;
-        if (chunkSize < 8) continue;
-
-        uint32_t numElements = *reinterpret_cast<const uint32_t*>(chunkData);
-        if (numElements == 0 || numElements > 64) continue;
-
-        // Element table starts after 8-byte chunk header (numElements + reserved).
-        // ISGN element = 24 bytes; ISG1 adds MinPrecision = 28 bytes.
-        size_t elemSize = (fourCC == kISG1) ? 28u : 24u;
-        const uint8_t* elements = chunkData + 8;
-        if (8u + numElements * elemSize > chunkSize) continue;
-
-        for (uint32_t j = 0; j < numElements; ++j)
-        {
-            const uint8_t* elem = elements + j * elemSize;
-            uint32_t nameOff       = *reinterpret_cast<const uint32_t*>(elem + 0);
-            uint32_t semanticIndex = *reinterpret_cast<const uint32_t*>(elem + 4);
-            // sysVal=elem+8, compType=elem+12, reg=elem+16, mask=elem[20], rwMask=elem[21]
-
-            if (nameOff >= chunkSize) continue;
-            const char* name = reinterpret_cast<const char*>(chunkData) + nameOff;
-            // Bound the name by the chunk extent to avoid OOB string compare.
-            size_t maxNameLen = chunkSize - nameOff;
-            if (maxNameLen < 9) continue; // "TEXCOORD\0"
-            if (strncmp(name, "TEXCOORD", 9) == 0 && semanticIndex == 7)
-                return true;
-        }
-        // Found the signature chunk — no need to keep searching.
-        break;
-    }
-    return false;
+    return MDIDxbc::InputSignatureHasSemantic(bytecode, size, "TEXCOORD", 7,
+                                              /*requireUint32=*/false);
 }
 
 // Detects the MDI_INSTANCE_ID_PARAMETER marker: a TEXCOORD7 input. Verbose
