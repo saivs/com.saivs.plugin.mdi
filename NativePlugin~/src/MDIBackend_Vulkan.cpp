@@ -5,6 +5,37 @@
 // Initialize / Shutdown
 // -----------------------------------------------------------------------
 
+// Whether the physical device reports the drawIndirectCount feature
+// (VkPhysicalDeviceVulkan12Features). Needed to gate the core-1.2
+// vkCmdDrawIndexedIndirectCount entry point: vkGetDeviceProcAddr returns it
+// non-null on ANY 1.2 device, even when the feature was not enabled at device
+// creation, so a non-null pointer alone doesn't make the call legal.
+static bool QueryDrawIndirectCountFeature(const UnityVulkanInstance& instance)
+{
+    if (!instance.physicalDevice)
+        return false;
+
+    auto getPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+        instance.getInstanceProcAddr(instance.instance, "vkGetPhysicalDeviceFeatures2"));
+    if (!getPhysicalDeviceFeatures2)
+        getPhysicalDeviceFeatures2 = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
+            instance.getInstanceProcAddr(instance.instance, "vkGetPhysicalDeviceFeatures2KHR"));
+    if (!getPhysicalDeviceFeatures2)
+        return false;
+
+    // Zero-init: a pre-1.2 driver ignores the unknown sType in the pNext chain
+    // and drawIndirectCount stays VK_FALSE.
+    VkPhysicalDeviceVulkan12Features features12 = {};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+    VkPhysicalDeviceFeatures2 features2 = {};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &features12;
+
+    getPhysicalDeviceFeatures2(instance.physicalDevice, &features2);
+    return features12.drawIndirectCount == VK_TRUE;
+}
+
 bool MDIBackend_Vulkan::Initialize(IUnityInterfaces* unityInterfaces)
 {
     // Try V2 first, fall back to V1 (same vtable layout for methods we use)
@@ -46,15 +77,29 @@ bool MDIBackend_Vulkan::Initialize(IUnityInterfaces* unityInterfaces)
         return false;
     }
 
-    // Optional: GPU-driven draw count (core 1.2, or KHR/AMD extension).
+    // Optional: GPU-driven draw count (KHR/AMD extension, or core 1.2).
+    // Extension entry points first: vkGetDeviceProcAddr returns them non-null
+    // only when the extension was actually enabled on the device, so a
+    // non-null pointer is proof the call is legal. The core name needs the
+    // extra drawIndirectCount feature check (see QueryDrawIndirectCountFeature).
+    // Caveat: for the core path we can only see what the PHYSICAL device
+    // supports — whether Unity enabled the feature at device creation isn't
+    // queryable from a plugin. Verify with validation layers when testing.
     _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
-        getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCount"));
-    if (!_vkCmdDrawIndexedIndirectCount)
-        _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
-            getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountKHR"));
+        getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountKHR"));
     if (!_vkCmdDrawIndexedIndirectCount)
         _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
             getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountAMD"));
+    if (!_vkCmdDrawIndexedIndirectCount)
+    {
+        auto coreProc = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+            getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCount"));
+        if (coreProc && QueryDrawIndirectCountFeature(instance))
+            _vkCmdDrawIndexedIndirectCount = coreProc;
+        else if (coreProc)
+            DebugLog("[MDI] Vulkan: core vkCmdDrawIndexedIndirectCount present but "
+                     "drawIndirectCount feature not reported — not using it\n");
+    }
     DebugLog("[MDI] Vulkan drawIndexedIndirectCount: %s\n",
         _vkCmdDrawIndexedIndirectCount ? "supported" : "NOT supported (GPU count will use maxDrawCount)");
 
