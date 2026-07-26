@@ -149,7 +149,7 @@ namespace Saivs.Graphics.Core.MDI
         /// <param name="bufferWithArgs">GPU buffer containing VkDrawIndexedIndirectCommand/D3D12_DRAW_INDEXED_ARGUMENTS structs</param>
         /// <param name="argsStartIndex">Starting struct offset (argsStartIndex * 20 bytes)</param>
         /// <param name="drawCountBuffer">GPU buffer containing the draw count as a uint32</param>
-        /// <param name="drawCountStartIndex">Byte offset in drawCountBuffer</param>
+        /// <param name="drawCountByteOffset">Byte offset of the uint32 count in drawCountBuffer (must be a multiple of 4)</param>
         /// <param name="maxDrawCount">Maximum number of draws (upper bound when GPU count is unavailable)</param>
         public static void MultiDrawMeshIndirect(
             this CommandBuffer cmd,
@@ -160,7 +160,7 @@ namespace Saivs.Graphics.Core.MDI
             GraphicsBuffer bufferWithArgs,
             int argsStartIndex,
             GraphicsBuffer drawCountBuffer,
-            int drawCountStartIndex,
+            int drawCountByteOffset,
             int maxDrawCount)
         {
             EnsureInitialized();
@@ -175,7 +175,7 @@ namespace Saivs.Graphics.Core.MDI
                     flags: MDI_FLAG_MESH_PATH | MDI_FLAG_GPU_COUNT,
                     slot: out int slot,
                     countBuffer: drawCountBuffer,
-                    countOffsetBytes: drawCountStartIndex);
+                    countOffsetBytes: drawCountByteOffset);
 
                 cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
                     _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);

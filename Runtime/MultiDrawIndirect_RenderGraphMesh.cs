@@ -110,7 +110,7 @@ namespace Saivs.Graphics.Core.MDI
             GraphicsBuffer bufferWithArgs,
             int argsStartIndex,
             GraphicsBuffer drawCountBuffer,
-            int drawCountStartIndex,
+            int drawCountByteOffset,
             int maxDrawCount)
         {
             EnsureInitialized();
@@ -125,7 +125,7 @@ namespace Saivs.Graphics.Core.MDI
                     flags: MDI_FLAG_MESH_PATH | MDI_FLAG_GPU_COUNT,
                     slot: out int slot,
                     countBuffer: drawCountBuffer,
-                    countOffsetBytes: drawCountStartIndex);
+                    countOffsetBytes: drawCountByteOffset);
 
                 cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
                     _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
@@ -156,7 +156,7 @@ namespace Saivs.Graphics.Core.MDI
             GraphicsBuffer bufferWithArgs,
             int argsStartIndex,
             GraphicsBuffer drawCountBuffer,
-            int drawCountStartIndex,
+            int drawCountByteOffset,
             int maxDrawCount)
         {
             EnsureInitialized();
@@ -171,7 +171,7 @@ namespace Saivs.Graphics.Core.MDI
                     flags: MDI_FLAG_MESH_PATH | MDI_FLAG_GPU_COUNT,
                     slot: out int slot,
                     countBuffer: drawCountBuffer,
-                    countOffsetBytes: drawCountStartIndex);
+                    countOffsetBytes: drawCountByteOffset);
 
                 cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
                     _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);

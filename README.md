@@ -230,7 +230,7 @@ cmd.MultiDrawIndexedIndirect(
     bufferWithArgs:      argsBuffer,
     argsStartIndex:      0,
     drawCountBuffer:     countBuffer, // uint32 draw count, written by GPU compute
-    drawCountStartIndex: 0,           // byte offset of the count inside countBuffer
+    drawCountByteOffset: 0,           // byte offset of the count inside countBuffer (multiple of 4)
     maxDrawCount:        maxDrawCount // upper bound (count is clamped to this)
 );
 ```

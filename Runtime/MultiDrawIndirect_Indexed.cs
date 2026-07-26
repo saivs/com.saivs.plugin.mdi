@@ -157,7 +157,7 @@ namespace Saivs.Graphics.Core.MDI
             GraphicsBuffer bufferWithArgs,
             int argsStartIndex,
             GraphicsBuffer drawCountBuffer, // Buffer updated dynamically by GPU compute
-            int drawCountStartIndex, // Byte offset inside count buffer (usually 0)
+            int drawCountByteOffset, // Byte offset of the uint32 count inside the count buffer (usually 0, must be a multiple of 4)
             int maxDrawCount // Fallback upper-bound limit for the hardware loop
         )
         {
@@ -174,7 +174,7 @@ namespace Saivs.Graphics.Core.MDI
                 // maxDrawCount draws — unused args entries must then be zeroed
                 // (instanceCount = 0) by the compute shader.
                 IntPtr dataPtr = WriteParams(bufferWithArgs, indexBuffer, argsStartIndex, maxDrawCount, topology, indexFormat: 1, flags: MDI_FLAG_GPU_COUNT, out int slot,
-                    countBuffer: drawCountBuffer, countOffsetBytes: drawCountStartIndex);
+                    countBuffer: drawCountBuffer, countOffsetBytes: drawCountByteOffset);
 
                 if (UsesPerInstanceVB)
                     cmd.DrawMesh(GetPrimeMesh(topology), Matrix4x4.identity, material, 0, shaderPass, properties);

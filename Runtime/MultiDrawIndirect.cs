@@ -292,6 +292,16 @@ namespace Saivs.Graphics.Core.MDI
         {
             slot = MDI_AllocSlot();
 
+            // D3D12/Vulkan/GL all require the uint32 count to sit on a 4-byte
+            // boundary. Rounding silently would make the GPU read the count
+            // from the wrong address — surface the caller's mistake instead.
+            if ((countOffsetBytes & 3) != 0)
+            {
+                Debug.LogError(
+                    $"[MDI] drawCountByteOffset must be a multiple of 4, got {countOffsetBytes} — rounding down to {countOffsetBytes & ~3}.");
+                countOffsetBytes &= ~3;
+            }
+
             _paramsRing[slot] = new NativeMDIParams
             {
                 argsBuffer = bufferWithArgs.GetNativeBufferPtr(),
@@ -303,10 +313,7 @@ namespace Saivs.Graphics.Core.MDI
                 flags = flags,
                 _pad = MDI_RING_MAGIC,
                 countBuffer = countBuffer != null ? countBuffer.GetNativeBufferPtr() : IntPtr.Zero,
-
-                // Bitwise AND with ~3u strips the lowest 2 bits,
-                // guaranteeing 4-byte (uint32) offset alignment for D3D12/Vulkan/GL hardware.
-                countOffsetBytes = (uint)(countOffsetBytes & ~3),
+                countOffsetBytes = (uint)countOffsetBytes,
                 _pad2 = 0,
             };
 
