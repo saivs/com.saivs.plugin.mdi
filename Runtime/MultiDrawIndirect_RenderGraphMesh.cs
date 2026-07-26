@@ -97,6 +97,98 @@ namespace Saivs.Graphics.Core.MDI
                 }
             }
         }
+
+        /// <summary>
+        /// Mesh-based multi-draw with GPU-driven draw count (RasterCommandBuffer).
+        /// </summary>
+        public static void MultiDrawMeshIndirect(
+            this RasterCommandBuffer cmd,
+            Mesh mesh,
+            Material material,
+            MaterialPropertyBlock properties,
+            int shaderPass,
+            GraphicsBuffer bufferWithArgs,
+            int argsStartIndex,
+            GraphicsBuffer drawCountBuffer,
+            int drawCountByteOffset,
+            int maxDrawCount)
+        {
+            EnsureInitialized();
+
+            if (_supported && maxDrawCount > 1 && MeshApiSupportedNatively)
+            {
+                var meshIndexBuffer = EnsureMeshIndexBuffer(mesh);
+                IntPtr dataPtr = WriteParams(
+                    bufferWithArgs, meshIndexBuffer, argsStartIndex, maxDrawCount,
+                    mesh.GetTopology(0),
+                    EncodeIndexFormat(mesh.indexFormat),
+                    flags: MDI_FLAG_MESH_PATH | MDI_FLAG_GPU_COUNT,
+                    slot: out int slot,
+                    countBuffer: drawCountBuffer,
+                    countOffsetBytes: drawCountByteOffset);
+
+                cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
+                    _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
+
+                if (_renderEventAndDataFunc != IntPtr.Zero)
+                    cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
+            }
+            else
+            {
+                if (_supported && !MeshApiSupportedNatively) WarnMeshFallbackOnce();
+                for (int i = 0; i < maxDrawCount; i++)
+                {
+                    cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
+                        bufferWithArgs, (argsStartIndex + i) * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Mesh-based multi-draw with GPU-driven draw count (UnsafeCommandBuffer).
+        /// </summary>
+        public static void MultiDrawMeshIndirect(
+            this UnsafeCommandBuffer cmd,
+            Mesh mesh,
+            Material material,
+            MaterialPropertyBlock properties,
+            int shaderPass,
+            GraphicsBuffer bufferWithArgs,
+            int argsStartIndex,
+            GraphicsBuffer drawCountBuffer,
+            int drawCountByteOffset,
+            int maxDrawCount)
+        {
+            EnsureInitialized();
+
+            if (_supported && maxDrawCount > 1 && MeshApiSupportedNatively)
+            {
+                var meshIndexBuffer = EnsureMeshIndexBuffer(mesh);
+                IntPtr dataPtr = WriteParams(
+                    bufferWithArgs, meshIndexBuffer, argsStartIndex, maxDrawCount,
+                    mesh.GetTopology(0),
+                    EncodeIndexFormat(mesh.indexFormat),
+                    flags: MDI_FLAG_MESH_PATH | MDI_FLAG_GPU_COUNT,
+                    slot: out int slot,
+                    countBuffer: drawCountBuffer,
+                    countOffsetBytes: drawCountByteOffset);
+
+                cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
+                    _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
+
+                if (_renderEventAndDataFunc != IntPtr.Zero)
+                    cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
+            }
+            else
+            {
+                if (_supported && !MeshApiSupportedNatively) WarnMeshFallbackOnce();
+                for (int i = 0; i < maxDrawCount; i++)
+                {
+                    cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
+                        bufferWithArgs, (argsStartIndex + i) * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
+                }
+            }
+        }
     }
 }
 #endif

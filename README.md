@@ -216,6 +216,37 @@ VertexOutput vert(uint vertexID : SV_VertexID, MDI_INSTANCE_ID_PARAMETER)
 ENDHLSL
 ```
 
+### GPU-driven draw count — `cmd.MultiDrawIndexedIndirect` (count-buffer overload)
+
+An overload of `MultiDrawIndexedIndirect` where the draw count is read by the GPU from a `GraphicsBuffer` (e.g. written by a culling compute shader via an atomic counter) instead of being fixed on the CPU — no readback or CPU sync required:
+
+```csharp
+cmd.MultiDrawIndexedIndirect(
+    indexBuffer:         indexBuffer,
+    material:            material,
+    properties:          propertyBlock,
+    shaderPass:          0,
+    topology:            MeshTopology.Triangles,
+    bufferWithArgs:      argsBuffer,
+    argsStartIndex:      0,
+    drawCountBuffer:     countBuffer, // uint32 draw count, written by GPU compute
+    drawCountByteOffset: 0,           // byte offset of the count inside countBuffer (multiple of 4)
+    maxDrawCount:        maxDrawCount // upper bound (count is clamped to this)
+);
+```
+
+Backend behaviour:
+
+| Backend | GPU count mechanism |
+|---|---|
+| D3D12 | `ExecuteIndirect` count buffer argument |
+| Vulkan | `vkCmdDrawIndexedIndirectCount` (core 1.2 / `KHR` / `AMD`), loop fallback otherwise |
+| OpenGL / GLES | `glMultiDrawElementsIndirectCount` (GL 4.6 / `ARB_indirect_parameters`), loop fallback otherwise |
+| WebGPU | `multiDrawIndexedIndirect` count-buffer argument (experimental multi-draw feature) |
+| D3D11 / Metal | No native count API — executes `maxDrawCount` draws |
+
+On backends without a native count mechanism (and in every loop fallback), `maxDrawCount` draws are executed, so the compute shader **must zero the `instanceCount` of unused args entries** — the extra draws then produce no work. Following that rule makes behaviour identical on all backends.
+
 **Backend support.** True single-call MDI through this API runs on every supported backend (D3D11, D3D12, Vulkan, Metal, WebGPU, OpenGL Core, OpenGL ES). On Metal, Vulkan and WebGPU the user mesh doesn't need a `TEXCOORD7` element — `MDI.hlsl` resolves `MDI_INSTANCE_ID` through `SV_InstanceID`. On D3D11 and D3D12 the native plugin reflects the user shader's vertex bytecode and patches the input layout / PSO at creation time to add a per-instance `TEXCOORD7 → identity buffer` element on slot 15, leaving the user mesh's vertex buffers untouched. On OpenGL / OpenGL ES the plugin clones Unity's mesh VAO into its own VAO and adds the same per-instance `TEXCOORD7` binding, with a small fingerprint-keyed cache so repeated draws of the same mesh skip the cloning. The mesh's `indexBufferTarget` is augmented with `Raw` automatically the first time it's seen, so `mesh.GetIndexBuffer()` returns a buffer the native plugin can address.
 
 ### `MDI.hlsl` macros

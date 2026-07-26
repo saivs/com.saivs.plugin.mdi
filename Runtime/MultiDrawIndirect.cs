@@ -44,8 +44,10 @@ namespace Saivs.Graphics.Core.MDI
 
         // MDIParams flags — must match MDI_FLAG_* in MDIBackend.h.
         private const uint MDI_FLAG_MESH_PATH = 1u << 0;
+        private const uint MDI_FLAG_GPU_COUNT = 1u << 1;
 
-        // Must match native MDIParams layout (two pointers + six uint32, last one is padding).
+        // Must match native MDIParams layout. GPU-count fields are appended at
+        // the end so the ring magic stays at u32 index 7 (see MDIBackend_WebGPU.jslib).
         [StructLayout(LayoutKind.Sequential)]
         private struct NativeMDIParams
         {
@@ -57,6 +59,9 @@ namespace Saivs.Graphics.Core.MDI
             public uint topology;
             public uint flags;
             public uint _pad;
+            public IntPtr countBuffer;    // GPU draw-count buffer (MDI_FLAG_GPU_COUNT), else zero
+            public uint countOffsetBytes; // Byte offset of the uint32 count inside countBuffer
+            public uint _pad2;
         }
 
         // Native imports
@@ -281,9 +286,21 @@ namespace Saivs.Graphics.Core.MDI
             MeshTopology topology,
             uint indexFormat,
             uint flags,
-            out int slot)
+            out int slot,
+            GraphicsBuffer countBuffer = null,
+            int countOffsetBytes = 0)
         {
             slot = MDI_AllocSlot();
+
+            // D3D12/Vulkan/GL all require the uint32 count to sit on a 4-byte
+            // boundary. Rounding silently would make the GPU read the count
+            // from the wrong address — surface the caller's mistake instead.
+            if ((countOffsetBytes & 3) != 0)
+            {
+                Debug.LogError(
+                    $"[MDI] drawCountByteOffset must be a multiple of 4, got {countOffsetBytes} — rounding down to {countOffsetBytes & ~3}.");
+                countOffsetBytes &= ~3;
+            }
 
             _paramsRing[slot] = new NativeMDIParams
             {
@@ -295,6 +312,9 @@ namespace Saivs.Graphics.Core.MDI
                 topology = (uint)topology,
                 flags = flags,
                 _pad = MDI_RING_MAGIC,
+                countBuffer = countBuffer != null ? countBuffer.GetNativeBufferPtr() : IntPtr.Zero,
+                countOffsetBytes = (uint)countOffsetBytes,
+                _pad2 = 0,
             };
 
             return (IntPtr)((NativeMDIParams*)_paramsRing.GetUnsafeReadOnlyPtr() + slot);

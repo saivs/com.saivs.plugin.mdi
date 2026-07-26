@@ -35,8 +35,9 @@ var LibraryMDIWebGPU = {
   $MDIWGPU: {
     MAX_PENDING: 256,
     ARGS_STRIDE: 20,          // sizeof(IndirectDrawIndexedArgs)
-    RING_STRIDE_U32: 8,       // sizeof(NativeMDIParams) on wasm32 = 32 bytes
+    RING_STRIDE_U32: 11,      // sizeof(NativeMDIParams) on wasm32 = 44 bytes
     MAGIC: 0x4D444921,        // must match MDI_RING_MAGIC in MultiDrawIndirect.cs
+    FLAG_GPU_COUNT: 2,        // must match MDI_FLAG_GPU_COUNT
 
     device: null,
     hasMultiDraw: false,
@@ -260,6 +261,9 @@ var LibraryMDIWebGPU = {
       var argsHandle = HEAPU32[base];
       var argsOffset = HEAPU32[base + 2];
       var count      = HEAPU32[base + 3];
+      var flags      = HEAPU32[base + 6];
+      var cntHandle  = HEAPU32[base + 8];
+      var cntOffset  = HEAPU32[base + 9];
 
       var t = MDIWGPU.table();
       var argsBuf = t ? t[argsHandle] : null;
@@ -269,8 +273,22 @@ var LibraryMDIWebGPU = {
         return false;
       }
 
+      // GPU-driven draw count buffer (MDI_FLAG_GPU_COUNT). Only usable with
+      // the experimental multi-draw feature; bundle/loop fallbacks execute the
+      // maxDrawCount upper bound (unused args entries must be zeroed).
+      var cntBuf = null;
+      if ((flags & MDIWGPU.FLAG_GPU_COUNT) && cntHandle) {
+        var cb = t ? t[cntHandle] : null;
+        if (typeof GPUBuffer !== 'undefined' && cb instanceof GPUBuffer) cntBuf = cb;
+        else MDIWGPU.warn('cnt', 'count buffer handle ' + cntHandle +
+          ' did not resolve to a GPUBuffer — using maxDrawCount');
+      }
+
       if (MDIWGPU.hasMultiDraw) {
-        encoder['multiDrawIndexedIndirect'](argsBuf, argsOffset, count);
+        if (cntBuf)
+          encoder['multiDrawIndexedIndirect'](argsBuf, argsOffset, count, cntBuf, cntOffset);
+        else
+          encoder['multiDrawIndexedIndirect'](argsBuf, argsOffset, count);
         return true;
       }
 

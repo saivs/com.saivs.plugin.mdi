@@ -38,6 +38,7 @@ if (WIN32)
     list(APPEND HEADERS
         src/MDIBackend_D3D12.h
         src/MDIBackend_D3D11.h
+        src/DxbcInputSignature.h
         src/Unity/IUnityGraphicsD3D11.h
         src/Unity/IUnityGraphicsD3D12.h
     )

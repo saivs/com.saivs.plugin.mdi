@@ -23,6 +23,7 @@ private:
 
     PFNGLDRAWELEMENTSINDIRECTPROC _glDrawElementsIndirect = nullptr;
     PFNGLMULTIDRAWELEMENTSINDIRECTEXTPROC _glMultiDrawElementsIndirectEXT = nullptr;
+    PFNGLMULTIDRAWELEMENTSINDIRECTCOUNTPROC _glMultiDrawElementsIndirectCount = nullptr;
     PFNGLBINDBUFFERPROC _glBindBuffer = nullptr;
     PFNGLGENBUFFERSPROC _glGenBuffers = nullptr;
     PFNGLDELETEBUFFERSPROC _glDeleteBuffers = nullptr;

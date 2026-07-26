@@ -29,7 +29,11 @@ namespace Saivs.Graphics.Core.MDI
         // new GraphicsBuffer the caller must Dispose — calling it every frame
         // leaks the wrapper. We allocate once per mesh and dispose all on
         // shutdown. Key is mesh.GetInstanceID().
+#if UNITY_6000_0_OR_NEWER && !UNITY_6000_0 && !UNITY_6000_1 && !UNITY_6000_2 && !UNITY_6000_3 && !UNITY_6000_4
+        private static readonly Dictionary<EntityId, GraphicsBuffer> _meshIndexBuffers = new Dictionary<EntityId, GraphicsBuffer>();
+#else
         private static readonly Dictionary<int, GraphicsBuffer> _meshIndexBuffers = new Dictionary<int, GraphicsBuffer>();
+#endif
         private static bool _meshFallbackWarned;
 
         // True when the current backend's MDI.hlsl branch routes the global
@@ -65,7 +69,11 @@ namespace Saivs.Graphics.Core.MDI
 
         private static GraphicsBuffer EnsureMeshIndexBuffer(Mesh mesh)
         {
+#if UNITY_6000_0_OR_NEWER && !UNITY_6000_0 && !UNITY_6000_1 && !UNITY_6000_2 && !UNITY_6000_3 && !UNITY_6000_4
+            EntityId id = mesh.GetEntityId();
+#else
             int id = mesh.GetInstanceID();
+#endif
             if (_meshIndexBuffers.TryGetValue(id, out var cached))
                 return cached;
 
@@ -123,6 +131,62 @@ namespace Saivs.Graphics.Core.MDI
             {
                 if (_supported && !MeshApiSupportedNatively) WarnMeshFallbackOnce();
                 for (int i = 0; i < argsCount; i++)
+                {
+                    cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
+                        bufferWithArgs, (argsStartIndex + i) * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Mesh-based multi-draw with GPU-driven draw count.
+        /// </summary>
+        /// <param name="cmd">Command buffer</param>
+        /// <param name="mesh">Mesh providing vertex/index data</param>
+        /// <param name="material">Material to render with</param>
+        /// <param name="properties">Material property block (or null)</param>
+        /// <param name="shaderPass">Shader pass index</param>
+        /// <param name="bufferWithArgs">GPU buffer containing VkDrawIndexedIndirectCommand/D3D12_DRAW_INDEXED_ARGUMENTS structs</param>
+        /// <param name="argsStartIndex">Starting struct offset (argsStartIndex * 20 bytes)</param>
+        /// <param name="drawCountBuffer">GPU buffer containing the draw count as a uint32</param>
+        /// <param name="drawCountByteOffset">Byte offset of the uint32 count in drawCountBuffer (must be a multiple of 4)</param>
+        /// <param name="maxDrawCount">Maximum number of draws (upper bound when GPU count is unavailable)</param>
+        public static void MultiDrawMeshIndirect(
+            this CommandBuffer cmd,
+            Mesh mesh,
+            Material material,
+            MaterialPropertyBlock properties,
+            int shaderPass,
+            GraphicsBuffer bufferWithArgs,
+            int argsStartIndex,
+            GraphicsBuffer drawCountBuffer,
+            int drawCountByteOffset,
+            int maxDrawCount)
+        {
+            EnsureInitialized();
+
+            if (_supported && maxDrawCount > 1 && MeshApiSupportedNatively)
+            {
+                var meshIndexBuffer = EnsureMeshIndexBuffer(mesh);
+                IntPtr dataPtr = WriteParams(
+                    bufferWithArgs, meshIndexBuffer, argsStartIndex, maxDrawCount,
+                    mesh.GetTopology(0),
+                    EncodeIndexFormat(mesh.indexFormat),
+                    flags: MDI_FLAG_MESH_PATH | MDI_FLAG_GPU_COUNT,
+                    slot: out int slot,
+                    countBuffer: drawCountBuffer,
+                    countOffsetBytes: drawCountByteOffset);
+
+                cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
+                    _dummyArgsBuffer, slot * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);
+
+                if (_renderEventAndDataFunc != IntPtr.Zero)
+                    cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + slot, dataPtr);
+            }
+            else
+            {
+                if (_supported && !MeshApiSupportedNatively) WarnMeshFallbackOnce();
+                for (int i = 0; i < maxDrawCount; i++)
                 {
                     cmd.DrawMeshInstancedIndirect(mesh, 0, material, shaderPass,
                         bufferWithArgs, (argsStartIndex + i) * INDIRECT_DRAW_INDEXED_ARGS_SIZE, properties);

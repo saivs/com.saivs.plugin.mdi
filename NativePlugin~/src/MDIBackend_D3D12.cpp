@@ -7,6 +7,7 @@
 #include <d3d11shader.h>
 #include "MDILog.h"
 #include "InlineHook.h"
+#include "DxbcInputSignature.h"
 
 // -----------------------------------------------------------------------
 // PSO hook: inject per-instance TEXCOORD7 into graphics PSOs.
@@ -25,8 +26,16 @@ static constexpr uint32_t kInstanceVBSlot = 15;
 // -----------------------------------------------------------------------
 // VS bytecode reflection (shared logic with D3D11 backend).
 // d3dcompiler_47.dll loaded dynamically — ships with every Win10+; if it's
-// somehow missing, mesh-path augmentation is skipped (existing indexed-path
-// patching keeps working since it doesn't rely on reflection).
+// somehow missing, we fall back to the container parser in
+// DxbcInputSignature.h (existing indexed-path patching also keeps working
+// since it doesn't rely on reflection at all).
+//
+// Shader model 6 note: Unity ships DXIL for SM6+, and D3DReflect only
+// understands DXBC (SM <= 5.1), so it fails on every SM6 shader. DXIL
+// containers still carry an input-signature chunk, so the parser fallback
+// is what makes the TEXCOORD7 detection work under SM6. Without it,
+// VSInputHasTexcoord7 returned false for all SM6 VS bytecode and the
+// per-instance TEXCOORD7 element was never injected.
 // -----------------------------------------------------------------------
 
 static const GUID kIID_ID3D11ShaderReflection_v47 =
@@ -52,7 +61,7 @@ static void EnsureD3DCompilerLoaded()
             GetProcAddress(g_d3dCompilerModule, "D3DReflect"));
 
     DebugLog("[MDI] D3D12 D3DReflect: %s\n",
-             g_D3DReflect ? "loaded" : "NOT loaded (mesh-path augmentation disabled)");
+             g_D3DReflect ? "loaded" : "NOT loaded (using container-parser fallback)");
 }
 
 // Detects the MDI_INSTANCE_ID_PARAMETER marker: a TEXCOORD7 input declared as
@@ -64,19 +73,39 @@ static void EnsureD3DCompilerLoaded()
 static bool VSInputHasTexcoord7(const void* bytecode, SIZE_T size)
 {
     EnsureD3DCompilerLoaded();
-    if (!g_D3DReflect || !bytecode || size == 0)
+    if (!bytecode || size == 0)
         return false;
 
     // Quick DXBC magic check ('DXBC' as little-endian uint32 = 0x43425844).
     // Guards against fake bytecode pointers from heuristic stream scans.
+    // Note: DXIL (SM6) containers use this same fourCC, so passing this check
+    // does not imply the blob is reflectable by D3DReflect.
     if (size < 4 || *reinterpret_cast<const uint32_t*>(bytecode) != 0x43425844u)
         return false;
+
+    // Strict UINT32 match is preserved in the fallback to keep the
+    // false-positive risk identical to the reflection path below.
+    auto parseFallback = [&]() -> bool {
+        return MDIDxbc::InputSignatureHasSemantic(bytecode, size, "TEXCOORD", 7,
+                                                  /*requireUint32=*/true);
+    };
+
+    if (!g_D3DReflect)
+        return parseFallback();
 
     ID3D11ShaderReflection* refl = nullptr;
     HRESULT hr = g_D3DReflect(bytecode, size, kIID_ID3D11ShaderReflection_v47,
                               reinterpret_cast<void**>(&refl));
     if (FAILED(hr) || !refl)
-        return false;
+    {
+        // Expected for every SM6 shader (DXIL) and for signature-only blobs.
+        bool found = parseFallback();
+        static uint32_t s_fallbackCount = 0;
+        if (s_fallbackCount++ < 8)
+            DebugLog("[MDI] D3D12 D3DReflect failed hr=0x%08X size=%zu, container-parser found=%d\n",
+                     hr, size, found ? 1 : 0);
+        return found;
+    }
 
     D3D11_SHADER_DESC desc = {};
     refl->GetDesc(&desc);
@@ -541,6 +570,15 @@ bool MDIBackend_D3D12::Initialize(IUnityInterfaces* unityInterfaces)
         return false;
     }
 
+    // Optional: v8 adds RequestResourceState/NotifyResourceState, which route
+    // our INDIRECT_ARGUMENT transitions through Unity's own state tracker
+    // (Unity knows the actual current state; we don't). Without it, ExecuteMDI
+    // falls back to assuming the buffers arrive in UAV state.
+    _d3d12v8 = unityInterfaces->Get<IUnityGraphicsD3D12v8>();
+    DebugLog("[MDI] D3D12 v8 interface: %s\n",
+             _d3d12v8 ? "available (tracked resource states)"
+                      : "NOT available (assuming UAV state for args/count buffers)");
+
     _device = _d3d12->GetDevice();
     if (!_device) return false;
 
@@ -721,6 +759,7 @@ void MDIBackend_D3D12::Shutdown()
 
     _device      = nullptr;
     _d3d12       = nullptr;
+    _d3d12v8     = nullptr;
     _initialized = false;
 
     if (g_d3dCompilerModule)
@@ -764,6 +803,21 @@ void MDIBackend_D3D12::ExecuteMDI(const MDIParams& params)
     }
 
     // Bind per-instance identity VB to slot 15.
+    //
+    // NOTE (not fixed here): what the VS receives in TEXCOORD7 is the IA
+    // instance index, i.e. StartInstanceLocation + instanceIndex of the
+    // sub-draw — NOT the index of the draw argument within argsBuffer. There
+    // is no INCREMENTING_CONSTANT in _cmdSignature because that argument type
+    // requires the command signature to be created with an ID3D12RootSignature
+    // (and a matching root constant slot), which Unity owns and we don't have.
+    //
+    // If a shader needs the argument index, the compute shader that fills
+    // argsBuffer can write StartInstanceLocation = drawIndex (with
+    // InstanceCount = 1); the IA then fetches element drawIndex from this
+    // buffer and TEXCOORD7 becomes the argument index — no command signature
+    // or root signature change required. That also makes _maxInstanceCount
+    // the upper bound on draw count, so ResizeInstanceIDBuffer would need to
+    // be driven by params.maxDrawCount.
     if (_instanceIDBuffer)
     {
         D3D12_VERTEX_BUFFER_VIEW vbView = {};
@@ -792,13 +846,104 @@ void MDIBackend_D3D12::ExecuteMDI(const MDIParams& params)
             break;
     }
 
-    // Single ExecuteIndirect — true multi-draw indirect
+    // Single ExecuteIndirect — true multi-draw indirect. With MDI_FLAG_GPU_COUNT
+    // the GPU reads the actual draw count from the count buffer (maxDrawCount
+    // acts as the upper bound, per the D3D12 count-buffer contract).
+    ID3D12Resource* countResource = nullptr;
+    if ((params.flags & MDI_FLAG_GPU_COUNT) && params.countBuffer)
+        countResource = static_cast<ID3D12Resource*>(params.countBuffer);
+
+    // -------------------------------------------------------------------
+    // Get args and count buffers into INDIRECT_ARGUMENT state.
+    //
+    // Preferred path (v8): RequestResourceState — Unity's state tracker
+    // knows the actual current state (UAV after a culling compute, COPY_DEST
+    // after SetData, ...), inserts the right barrier into the active command
+    // list, and keeps tracking consistent for whatever Unity records next.
+    //
+    // Fallback path (no v8): we cannot query the real state, so assume the
+    // common case for this feature — a compute shader just wrote the buffers,
+    // i.e. UAV. To stay valid across repeated MDI draws in one frame and to
+    // keep Unity's (unaware) tracker matching reality, we transition back to
+    // UAV after the ExecuteIndirect.
+    // -------------------------------------------------------------------
+    if (_d3d12v8)
+    {
+        if (argsResource)
+            _d3d12v8->RequestResourceState(argsResource, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        if (countResource)
+            _d3d12v8->RequestResourceState(countResource, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    }
+    else
+    {
+        D3D12_RESOURCE_BARRIER barriers[2] = {};
+        UINT barrierCount = 0;
+
+        if (argsResource)
+        {
+            barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barriers[barrierCount].Transition.pResource = argsResource;
+            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            barrierCount++;
+        }
+
+        if (countResource)
+        {
+            barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barriers[barrierCount].Transition.pResource = countResource;
+            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            barrierCount++;
+        }
+
+        if (barrierCount > 0)
+            cmdList->ResourceBarrier(barrierCount, barriers);
+    }
+
     cmdList->ExecuteIndirect(
         _cmdSignature,
         params.maxDrawCount,
         argsResource,
         params.argsOffsetBytes,
-        nullptr, 0);
+        countResource,
+        countResource ? params.countOffsetBytes : 0);
+
+    if (!_d3d12v8)
+    {
+        // Fallback only: restore the assumed UAV state (see comment above).
+        D3D12_RESOURCE_BARRIER barriers[2] = {};
+        UINT barrierCount = 0;
+
+        if (argsResource)
+        {
+            barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barriers[barrierCount].Transition.pResource = argsResource;
+            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barrierCount++;
+        }
+
+        if (countResource)
+        {
+            barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barriers[barrierCount].Transition.pResource = countResource;
+            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barrierCount++;
+        }
+
+        if (barrierCount > 0)
+            cmdList->ResourceBarrier(barrierCount, barriers);
+    }
 
     static uint32_t s_callCount = 0;
     s_callCount++;

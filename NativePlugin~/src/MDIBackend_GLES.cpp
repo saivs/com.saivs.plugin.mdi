@@ -129,6 +129,15 @@ bool MDIBackend_GLES::ResolveGLFunctions()
         _glMultiDrawElementsIndirectEXT =
             (PFNGLMULTIDRAWELEMENTSINDIRECTEXTPROC)GLGetProcAddress("glMultiDrawElementsIndirect");
 
+    // Optional: GPU-driven draw count (GL 4.6 core / GL_ARB_indirect_parameters)
+    _glMultiDrawElementsIndirectCount =
+        (PFNGLMULTIDRAWELEMENTSINDIRECTCOUNTPROC)GLGetProcAddress("glMultiDrawElementsIndirectCount");
+    if (!_glMultiDrawElementsIndirectCount)
+        _glMultiDrawElementsIndirectCount =
+            (PFNGLMULTIDRAWELEMENTSINDIRECTCOUNTPROC)GLGetProcAddress("glMultiDrawElementsIndirectCountARB");
+    DebugLog("[MDI] GLES: glMultiDrawElementsIndirectCount %s\n",
+        _glMultiDrawElementsIndirectCount ? "supported" : "NOT supported (GPU count will use maxDrawCount)");
+
     // Identity buffer support
     _glGenBuffers = (PFNGLGENBUFFERSPROC)GLGetProcAddress("glGenBuffers");
     _glDeleteBuffers = (PFNGLDELETEBUFFERSPROC)GLGetProcAddress("glDeleteBuffers");
@@ -522,7 +531,27 @@ void MDIBackend_GLES::ExecuteMDI(const MDIParams& params)
 
     const auto drawMode = GetDrawMode(params.topology);
 
-    if (_multiDrawIndirectSupported)
+    const bool useGpuCount = (params.flags & MDI_FLAG_GPU_COUNT) != 0 &&
+                             params.countBuffer != nullptr &&
+                             _glMultiDrawElementsIndirectCount != nullptr;
+
+    if (useGpuCount)
+    {
+        // GPU-driven draw count: hardware reads the actual count from the
+        // GL_PARAMETER_BUFFER binding, clamped to maxDrawCount.
+        GLuint countBufferGL = static_cast<GLuint>(reinterpret_cast<uintptr_t>(params.countBuffer));
+        _glBindBuffer(GL_PARAMETER_BUFFER, countBufferGL);
+        _glMultiDrawElementsIndirectCount(
+            drawMode,
+            indexType,
+            reinterpret_cast<const void*>(static_cast<uintptr_t>(params.argsOffsetBytes)),
+            static_cast<GLintptr>(params.countOffsetBytes),
+            static_cast<GLsizei>(params.maxDrawCount),
+            static_cast<GLsizei>(stride)
+        );
+        _glBindBuffer(GL_PARAMETER_BUFFER, 0);
+    }
+    else if (_multiDrawIndirectSupported)
     {
         _glMultiDrawElementsIndirectEXT(
             drawMode,

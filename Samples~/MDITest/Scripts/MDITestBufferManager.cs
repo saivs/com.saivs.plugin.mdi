@@ -38,16 +38,36 @@ namespace Saivs.Graphics.Test
         private GraphicsBuffer _vertexBuffer;
         private GraphicsBuffer _drawPositionsBuffer;
         private GraphicsBuffer _argsBuffer;
+        private GraphicsBuffer _drawCountBuffer;
         private MaterialPropertyBlock _mpb;
         private Mesh _combinedMesh;
         private int _drawCount;
+        private int _uploadedGpuCount = -1;
+        private readonly uint[] _gpuCountUpload = new uint[1];
 
         public GraphicsBuffer IndexBuffer => _indexBuffer;
         public GraphicsBuffer ArgsBuffer => _argsBuffer;
+        public GraphicsBuffer DrawCountBuffer => _drawCountBuffer;
         public MaterialPropertyBlock MPB => _mpb;
         public int DrawCount => _drawCount;
         public Mesh CombinedMesh => _combinedMesh;
         public bool HasMeshes => _meshes != null && _meshes.Length > 0;
+
+        // Uploads the GPU draw count (clamped to [0, DrawCount]) into
+        // _drawCountBuffer. In this sample the count comes from a UI slider via
+        // SetData; in a real GPU-driven setup a culling compute shader would
+        // write it instead — either way the draw call reads it from the buffer.
+        public void SetGpuDrawCount(int count)
+        {
+            if (_drawCountBuffer == null) return;
+
+            count = Mathf.Clamp(count < 0 ? _drawCount : count, 0, _drawCount);
+            if (count == _uploadedGpuCount) return;
+
+            _gpuCountUpload[0] = (uint)count;
+            _drawCountBuffer.SetData(_gpuCountUpload);
+            _uploadedGpuCount = count;
+        }
 
         private void OnEnable()
         {
@@ -118,6 +138,16 @@ namespace Saivs.Graphics.Test
             _argsBuffer.SetData(args);
 
             _drawCount = subDrawCount;
+
+            // Single uint32 read by the GPU as the draw count (GPU-count draw
+            // mode). IndirectArguments is required so the underlying buffer is
+            // created with indirect usage on Vulkan/WebGPU; Structured keeps it
+            // writable from a compute shader.
+            _drawCountBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.IndirectArguments | GraphicsBuffer.Target.Structured,
+                1, sizeof(uint));
+            _uploadedGpuCount = -1;
+            SetGpuDrawCount(subDrawCount);
 
             _mpb = new MaterialPropertyBlock();
             _mpb.SetBuffer("_VertexBuffer", _vertexBuffer);
@@ -210,11 +240,14 @@ namespace Saivs.Graphics.Test
             _vertexBuffer?.Dispose();
             _drawPositionsBuffer?.Dispose();
             _argsBuffer?.Dispose();
+            _drawCountBuffer?.Dispose();
 
             _indexBuffer = null;
             _vertexBuffer = null;
             _drawPositionsBuffer = null;
             _argsBuffer = null;
+            _drawCountBuffer = null;
+            _uploadedGpuCount = -1;
 
             if (_combinedMesh != null)
             {

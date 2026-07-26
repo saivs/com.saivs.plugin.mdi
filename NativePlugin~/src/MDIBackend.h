@@ -5,6 +5,7 @@
 
 // flags bitfield for MDIParams
 static constexpr uint32_t MDI_FLAG_MESH_PATH = 1u << 0; // user-supplied mesh (vs. procedural / indexed)
+static constexpr uint32_t MDI_FLAG_GPU_COUNT = 1u << 1; // draw count comes from countBuffer (GPU-written)
 
 // Shared parameter struct for MDI calls
 struct MDIParams
@@ -12,11 +13,14 @@ struct MDIParams
     void*    argsBuffer;          // Native GPU buffer pointer (ID3D12Resource*, VkBuffer, etc.)
     void*    indexBuffer;         // Native index buffer pointer (for D3D11 IASetIndexBuffer rebind)
     uint32_t argsOffsetBytes;     // Byte offset into the args buffer
-    uint32_t maxDrawCount;        // Number of draw commands to execute
+    uint32_t maxDrawCount;        // Number of draw commands to execute (upper bound with MDI_FLAG_GPU_COUNT)
     uint32_t indexFormat;         // 0 = R16_UINT, 1 = R32_UINT
     uint32_t topology;            // 0 - triangle list, 3 - line list, 4 - line strip, 5 - point list
     uint32_t flags;               // MDI_FLAG_* bitfield
     uint32_t _pad;                // pad to 8-byte alignment (matches C# NativeMDIParams)
+    void*    countBuffer;         // GPU draw-count buffer (MDI_FLAG_GPU_COUNT), else null
+    uint32_t countOffsetBytes;    // Byte offset of the uint32 draw count inside countBuffer
+    uint32_t _pad2;               // pad to 8-byte alignment
 };
 
 static constexpr int MDI_MAX_PENDING = 256;
