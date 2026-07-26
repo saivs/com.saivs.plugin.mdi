@@ -570,6 +570,15 @@ bool MDIBackend_D3D12::Initialize(IUnityInterfaces* unityInterfaces)
         return false;
     }
 
+    // Optional: v8 adds RequestResourceState/NotifyResourceState, which route
+    // our INDIRECT_ARGUMENT transitions through Unity's own state tracker
+    // (Unity knows the actual current state; we don't). Without it, ExecuteMDI
+    // falls back to assuming the buffers arrive in UAV state.
+    _d3d12v8 = unityInterfaces->Get<IUnityGraphicsD3D12v8>();
+    DebugLog("[MDI] D3D12 v8 interface: %s\n",
+             _d3d12v8 ? "available (tracked resource states)"
+                      : "NOT available (assuming UAV state for args/count buffers)");
+
     _device = _d3d12->GetDevice();
     if (!_device) return false;
 
@@ -750,6 +759,7 @@ void MDIBackend_D3D12::Shutdown()
 
     _device      = nullptr;
     _d3d12       = nullptr;
+    _d3d12v8     = nullptr;
     _initialized = false;
 
     if (g_d3dCompilerModule)
@@ -844,35 +854,56 @@ void MDIBackend_D3D12::ExecuteMDI(const MDIParams& params)
         countResource = static_cast<ID3D12Resource*>(params.countBuffer);
 
     // -------------------------------------------------------------------
-    // Transition args and count buffers from UAV to INDIRECT_ARGUMENT
+    // Get args and count buffers into INDIRECT_ARGUMENT state.
+    //
+    // Preferred path (v8): RequestResourceState — Unity's state tracker
+    // knows the actual current state (UAV after a culling compute, COPY_DEST
+    // after SetData, ...), inserts the right barrier into the active command
+    // list, and keeps tracking consistent for whatever Unity records next.
+    //
+    // Fallback path (no v8): we cannot query the real state, so assume the
+    // common case for this feature — a compute shader just wrote the buffers,
+    // i.e. UAV. To stay valid across repeated MDI draws in one frame and to
+    // keep Unity's (unaware) tracker matching reality, we transition back to
+    // UAV after the ExecuteIndirect.
     // -------------------------------------------------------------------
-    D3D12_RESOURCE_BARRIER barriers[2] = {};
-    UINT barrierCount = 0;
-
-    if (argsResource)
+    if (_d3d12v8)
     {
-        barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        barriers[barrierCount].Transition.pResource = argsResource;
-        barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-        barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
-        barrierCount++;
+        if (argsResource)
+            _d3d12v8->RequestResourceState(argsResource, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        if (countResource)
+            _d3d12v8->RequestResourceState(countResource, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
     }
-
-    if (countResource)
+    else
     {
-        barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        barriers[barrierCount].Transition.pResource = countResource;
-        barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-        barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
-        barrierCount++;
-    }
+        D3D12_RESOURCE_BARRIER barriers[2] = {};
+        UINT barrierCount = 0;
 
-    if (barrierCount > 0)
-        cmdList->ResourceBarrier(barrierCount, barriers);
+        if (argsResource)
+        {
+            barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barriers[barrierCount].Transition.pResource = argsResource;
+            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            barrierCount++;
+        }
+
+        if (countResource)
+        {
+            barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barriers[barrierCount].Transition.pResource = countResource;
+            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            barrierCount++;
+        }
+
+        if (barrierCount > 0)
+            cmdList->ResourceBarrier(barrierCount, barriers);
+    }
 
     cmdList->ExecuteIndirect(
         _cmdSignature,
@@ -881,6 +912,38 @@ void MDIBackend_D3D12::ExecuteMDI(const MDIParams& params)
         params.argsOffsetBytes,
         countResource,
         countResource ? params.countOffsetBytes : 0);
+
+    if (!_d3d12v8)
+    {
+        // Fallback only: restore the assumed UAV state (see comment above).
+        D3D12_RESOURCE_BARRIER barriers[2] = {};
+        UINT barrierCount = 0;
+
+        if (argsResource)
+        {
+            barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barriers[barrierCount].Transition.pResource = argsResource;
+            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barrierCount++;
+        }
+
+        if (countResource)
+        {
+            barriers[barrierCount].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barriers[barrierCount].Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barriers[barrierCount].Transition.pResource = countResource;
+            barriers[barrierCount].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barriers[barrierCount].Transition.StateBefore = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+            barriers[barrierCount].Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            barrierCount++;
+        }
+
+        if (barrierCount > 0)
+            cmdList->ResourceBarrier(barrierCount, barriers);
+    }
 
     static uint32_t s_callCount = 0;
     s_callCount++;

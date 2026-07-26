@@ -24,6 +24,9 @@ private:
     void CreateInstanceIDBuffer();
 
     IUnityGraphicsD3D12v7* _d3d12       = nullptr;
+    // Optional (newer Unity): RequestResourceState/NotifyResourceState let us
+    // cooperate with Unity's resource-state tracker instead of guessing states.
+    IUnityGraphicsD3D12v8* _d3d12v8     = nullptr;
     ID3D12Device*          _device       = nullptr;
     ID3D12CommandSignature* _cmdSignature = nullptr;  // basic: DrawIndexed only
     bool                   _initialized  = false;
