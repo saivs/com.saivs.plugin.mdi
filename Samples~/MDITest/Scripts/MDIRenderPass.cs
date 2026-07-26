@@ -28,6 +28,7 @@ namespace Saivs.Graphics.Test
         private int _drawCount;
         private MDITestController.DrawMode _drawMode;
         private Mesh _combinedMesh;
+        private GraphicsBuffer _drawCountBuffer;
 
         public MDIRenderPass()
         {
@@ -41,7 +42,8 @@ namespace Saivs.Graphics.Test
             MaterialPropertyBlock mpb,
             int drawCount,
             MDITestController.DrawMode drawMode,
-            Mesh combinedMesh)
+            Mesh combinedMesh,
+            GraphicsBuffer drawCountBuffer)
         {
             _indexBuffer = indexBuffer;
             _argsBuffer = argsBuffer;
@@ -50,6 +52,7 @@ namespace Saivs.Graphics.Test
             _drawCount = drawCount;
             _drawMode = drawMode;
             _combinedMesh = combinedMesh;
+            _drawCountBuffer = drawCountBuffer;
         }
 
         private class PassData
@@ -61,6 +64,7 @@ namespace Saivs.Graphics.Test
             public int drawCount;
             public MDITestController.DrawMode drawMode;
             public Mesh combinedMesh;
+            public GraphicsBuffer drawCountBuffer;
         }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -78,6 +82,7 @@ namespace Saivs.Graphics.Test
             passData.drawCount = _drawCount;
             passData.drawMode = _drawMode;
             passData.combinedMesh = _combinedMesh;
+            passData.drawCountBuffer = _drawCountBuffer;
 
             builder.SetRenderAttachment(resourceData.activeColorTexture, 0);
             builder.SetRenderAttachmentDepth(resourceData.activeDepthTexture);
@@ -104,6 +109,24 @@ namespace Saivs.Graphics.Test
                         bufferWithArgs: data.argsBuffer,
                         argsStartIndex: 0,
                         argsCount: data.drawCount);
+                    break;
+
+                case MDITestController.DrawMode.MultiDrawIndexedIndirectGpuCount:
+                    // The GPU reads the actual draw count from drawCountBuffer
+                    // (clamped to maxDrawCount). On backends without a native
+                    // count API the full maxDrawCount executes instead — see
+                    // the DrawMode comment in MDITestController.
+                    cmd.MultiDrawIndexedIndirect(
+                        indexBuffer: data.indexBuffer,
+                        material: data.material,
+                        properties: data.mpb,
+                        shaderPass: PASS_MDI_INDEXED,
+                        topology: MeshTopology.Triangles,
+                        bufferWithArgs: data.argsBuffer,
+                        argsStartIndex: 0,
+                        drawCountBuffer: data.drawCountBuffer,
+                        drawCountByteOffset: 0,
+                        maxDrawCount: data.drawCount);
                     break;
 
                 case MDITestController.DrawMode.ProceduralIndirectLoop:

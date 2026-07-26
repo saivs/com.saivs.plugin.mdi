@@ -46,6 +46,7 @@ namespace Saivs.Graphics.Test
             var drawCount = _controller != null ? _controller.BufferManager.DrawCount : 0;
 
             bool isPluginMode = drawMode == MDITestController.DrawMode.MultiDrawIndexedIndirect
+                             || drawMode == MDITestController.DrawMode.MultiDrawIndexedIndirectGpuCount
                              || drawMode == MDITestController.DrawMode.MultiDrawMeshIndirect;
 
             _guiStyle.normal.textColor = isPluginMode

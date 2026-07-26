@@ -20,6 +20,15 @@ namespace Saivs.Graphics.Test
             MultiDrawMeshIndirect,
             DrawMeshInstancedIndirect,
             RenderMeshIndirect,
+
+            // GPU-count track — the draw count is read by the GPU from a count
+            // buffer (here fed by the on-screen slider; in a real setup a
+            // culling compute shader writes it). On backends without a native
+            // count API (D3D11, Metal, loop fallbacks) maxDrawCount draws run
+            // regardless, so the slider has no visual effect there — which
+            // makes it a handy diagnostic for the native count path.
+            // Appended last to keep serialized DrawMode values stable.
+            MultiDrawIndexedIndirectGpuCount,
         }
 
         [Header("Rendering")]
@@ -32,6 +41,9 @@ namespace Saivs.Graphics.Test
 
         [SerializeField] private DrawMode _drawMode = DrawMode.MultiDrawIndexedIndirect;
         [SerializeField] private MDITestBufferManager _bufferManager;
+
+        [Tooltip("Draw count uploaded into the GPU count buffer for the GpuCount mode. -1 = all sub-draws. Driven by the on-screen slider at runtime.")]
+        [SerializeField] private int _gpuDrawCount = -1;
 
         private MDIRenderPass _mdiRenderPass;
         private bool _missingMeshMatWarned;
@@ -79,12 +91,13 @@ namespace Saivs.Graphics.Test
         {
             _drawMode = _drawMode switch
             {
-                DrawMode.MultiDrawIndexedIndirect       => DrawMode.ProceduralIndirectLoop,
-                DrawMode.ProceduralIndirectLoop          => DrawMode.RenderPrimitivesIndexedIndirect,
-                DrawMode.RenderPrimitivesIndexedIndirect => DrawMode.MultiDrawMeshIndirect,
-                DrawMode.MultiDrawMeshIndirect           => DrawMode.DrawMeshInstancedIndirect,
-                DrawMode.DrawMeshInstancedIndirect       => DrawMode.RenderMeshIndirect,
-                _                                        => DrawMode.MultiDrawIndexedIndirect,
+                DrawMode.MultiDrawIndexedIndirect         => DrawMode.MultiDrawIndexedIndirectGpuCount,
+                DrawMode.MultiDrawIndexedIndirectGpuCount => DrawMode.ProceduralIndirectLoop,
+                DrawMode.ProceduralIndirectLoop           => DrawMode.RenderPrimitivesIndexedIndirect,
+                DrawMode.RenderPrimitivesIndexedIndirect  => DrawMode.MultiDrawMeshIndirect,
+                DrawMode.MultiDrawMeshIndirect            => DrawMode.DrawMeshInstancedIndirect,
+                DrawMode.DrawMeshInstancedIndirect        => DrawMode.RenderMeshIndirect,
+                _                                         => DrawMode.MultiDrawIndexedIndirect,
             };
         }
 
@@ -167,6 +180,9 @@ namespace Saivs.Graphics.Test
             if (camera.GetUniversalAdditionalCameraData().scriptableRenderer is not UniversalRenderer urpRenderer)
                 return;
 
+            if (_drawMode == DrawMode.MultiDrawIndexedIndirectGpuCount)
+                _bufferManager.SetGpuDrawCount(_gpuDrawCount);
+
             _mdiRenderPass.SetRenderData(
                 _bufferManager.IndexBuffer,
                 _bufferManager.ArgsBuffer,
@@ -174,9 +190,30 @@ namespace Saivs.Graphics.Test
                 _bufferManager.MPB,
                 _bufferManager.DrawCount,
                 _drawMode,
-                _bufferManager.CombinedMesh);
+                _bufferManager.CombinedMesh,
+                _bufferManager.DrawCountBuffer);
 
             urpRenderer.EnqueuePass(_mdiRenderPass);
+        }
+
+        // Runtime slider for the GPU-count mode — drag to change how many of
+        // the sub-draws the GPU executes. The value only ever reaches the GPU
+        // through the count buffer, so a responding slider proves the native
+        // count path is active on the current backend.
+        private void OnGUI()
+        {
+            if (_drawMode != DrawMode.MultiDrawIndexedIndirectGpuCount) return;
+            if (_bufferManager == null || _bufferManager.DrawCountBuffer == null) return;
+
+            int max = _bufferManager.DrawCount;
+            int current = _gpuDrawCount < 0 ? max : Mathf.Clamp(_gpuDrawCount, 0, max);
+
+            var sliderRect = new Rect(10f, Screen.height - 40f, 320f, 22f);
+            var labelRect  = new Rect(10f, Screen.height - 64f, 320f, 20f);
+
+            GUI.Label(labelRect, $"GPU draw count: {current} / {max}");
+            _gpuDrawCount = Mathf.RoundToInt(
+                GUI.HorizontalSlider(sliderRect, current, 0f, max));
         }
     }
 }

@@ -764,7 +764,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::MDITestController
   _indexedMaterial: {fileID: 2100000, guid: e3989f0f9176eb044b1ac67c86723f89, type: 2}
   _meshMaterial: {fileID: 2100000, guid: 12bb342061114d1e938119948e293e2e, type: 2}
-  _drawMode: 3
+  _drawMode: 6
+  _gpuDrawCount: -1
   _bufferManager: {fileID: 866735226}
 --- !u!114 &866735226
 MonoBehaviour:
