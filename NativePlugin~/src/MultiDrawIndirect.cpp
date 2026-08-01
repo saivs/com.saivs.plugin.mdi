@@ -12,6 +12,7 @@
 #include "MDIBackend_D3D11.h"
 #endif
 #include "MDIBackend_Vulkan.h"
+#include "MDIVulkanStateTracker.h"
 #include "MDIBackend_GLES.h"
 #if defined(__APPLE__)
 #include "MDIBackend_Metal.h"
@@ -57,7 +58,15 @@ static IMDIBackend* CreateBackend(UnityGfxRenderer renderer)
     {
         auto* backend = new MDIBackend_Vulkan();
         if (backend->Initialize(g_unityInterfaces))
+        {
+            // Event configuration is valid at device-init time (the UGE
+            // plugin configures here too). Doing it at UnityPluginLoad is
+            // not an option: the renderer is unknown there in the editor,
+            // and touching the Vulkan interface under an active D3D device
+            // crashes.
+            backend->ConfigureEvents(g_unityInterfaces, g_baseEventID, MDI_MAX_PENDING);
             return backend;
+        }
         delete backend;
         return &g_stubBackend;
     }
@@ -120,8 +129,9 @@ UnityPluginLoad(IUnityInterfaces* unityInterfaces)
     g_unityInterfaces = unityInterfaces;
     g_graphics = unityInterfaces->Get<IUnityGraphics>();
 
-    // Reserve unique event IDs to avoid clashes with other plugins
-    g_baseEventID = g_graphics->ReserveEventIDRange(MDI_MAX_PENDING);
+    // Reserve unique event IDs to avoid clashes with other plugins.
+    // +1: the trailing prepare event (see MDIBackend::PrepareIndirectArgs).
+    g_baseEventID = g_graphics->ReserveEventIDRange(MDI_MAX_PENDING + 1);
 
 #ifdef _WIN32
     // D3D12: ConfigureEvent must be called during UnityPluginLoad, before device init
@@ -132,11 +142,17 @@ UnityPluginLoad(IUnityInterfaces* unityInterfaces)
     }
 #endif
 
-    // Vulkan: ConfigureEvent must be called during UnityPluginLoad, before device init
-    if (g_graphics->GetRenderer() == kUnityGfxRendererVulkan)
+    // Vulkan: interception must be registered before the Vulkan device
+    // initializes. GetRenderer() reports Null when the plugin loads before
+    // device init (preloaded GfxPlugin*), and the concrete API once the
+    // device exists (lazy load on first P/Invoke). Register for Vulkan and
+    // for Null — but NEVER when another API is already live: touching the
+    // Vulkan interface on an active D3D12 editor crashes inside Unity.
+    // (Event configuration happens later, at device init — see CreateBackend.)
     {
-        MDIBackend_Vulkan configurator;
-        configurator.ConfigureEvents(unityInterfaces, g_baseEventID, MDI_MAX_PENDING);
+        const UnityGfxRenderer rendererAtLoad = g_graphics->GetRenderer();
+        if (rendererAtLoad == kUnityGfxRendererVulkan || rendererAtLoad == kUnityGfxRendererNull)
+            MDIVulkanInterceptRegister(unityInterfaces);
     }
 
     g_graphics->RegisterDeviceEventCallback(OnGraphicsDeviceEvent);
@@ -180,7 +196,19 @@ static void UNITY_INTERFACE_API OnRenderEventAndData(int eventID, void* data)
     if (!g_backendSupported || !g_backend)
         return;
 
-    int slot = (eventID - g_baseEventID) % MDI_MAX_PENDING;
+    int localEvent = eventID - g_baseEventID;
+
+    // Trailing prepare event: records the write→indirect-read barrier for an
+    // args buffer, outside any render pass. The ring slot carries only the
+    // buffer pointer for this one.
+    if (localEvent == MDI_MAX_PENDING)
+    {
+        if (data)
+            g_backend->PrepareIndirectArgs(static_cast<const MDIParams*>(data)->argsBuffer);
+        return;
+    }
+
+    int slot = localEvent % MDI_MAX_PENDING;
     if (slot < 0) slot += MDI_MAX_PENDING;
 
     // Copy params from data pointer into pending slot

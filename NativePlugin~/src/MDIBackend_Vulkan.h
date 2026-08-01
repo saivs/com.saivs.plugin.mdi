@@ -13,6 +13,7 @@ public:
     bool Initialize(IUnityInterfaces* unityInterfaces) override;
     void Shutdown() override;
     void ExecuteMDI(const MDIParams& params) override;
+    void PrepareIndirectArgs(void* argsBuffer) override;
     bool IsSupported() const override;
 
     void ConfigureEvents(IUnityInterfaces* unityInterfaces, int baseEventID, int count);

@@ -1,15 +1,19 @@
 #include "MDIBackend_Vulkan.h"
+#include "MDIVulkanStateTracker.h"
 #include "MDILog.h"
+
+#include <atomic>
 
 // -----------------------------------------------------------------------
 // Initialize / Shutdown
 // -----------------------------------------------------------------------
 
 // Whether the physical device reports the drawIndirectCount feature
-// (VkPhysicalDeviceVulkan12Features). Needed to gate the core-1.2
-// vkCmdDrawIndexedIndirectCount entry point: vkGetDeviceProcAddr returns it
-// non-null on ANY 1.2 device, even when the feature was not enabled at device
-// creation, so a non-null pointer alone doesn't make the call legal.
+// (VkPhysicalDeviceVulkan12Features). Fallback gate for the core-1.2
+// vkCmdDrawIndexedIndirectCount entry point when vkCreateDevice was NOT
+// observed: vkGetDeviceProcAddr returns it non-null on ANY 1.2 device, even
+// when the feature was not enabled at device creation, so a non-null pointer
+// alone doesn't make the call legal.
 static bool QueryDrawIndirectCountFeature(const UnityVulkanInstance& instance)
 {
     if (!instance.physicalDevice)
@@ -77,50 +81,78 @@ bool MDIBackend_Vulkan::Initialize(IUnityInterfaces* unityInterfaces)
         return false;
     }
 
-    // Optional: GPU-driven draw count (KHR/AMD extension, or core 1.2).
-    // Extension entry points first: vkGetDeviceProcAddr returns them non-null
-    // only when the extension was actually enabled on the device, so a
-    // non-null pointer is proof the call is legal. The core name needs the
-    // extra drawIndirectCount feature check (see QueryDrawIndirectCountFeature).
-    // Caveat: for the core path we can only see what the PHYSICAL device
-    // supports — whether Unity enabled the feature at device creation isn't
-    // queryable from a plugin. Verify with validation layers when testing.
-    _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
-        getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountKHR"));
-    if (!_vkCmdDrawIndexedIndirectCount)
-        _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
-            getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountAMD"));
-    if (!_vkCmdDrawIndexedIndirectCount)
-    {
-        auto coreProc = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
-            getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCount"));
-        if (coreProc && QueryDrawIndirectCountFeature(instance))
-            _vkCmdDrawIndexedIndirectCount = coreProc;
-        else if (coreProc)
-            DebugLog("[MDI] Vulkan: core vkCmdDrawIndexedIndirectCount present but "
-                     "drawIndirectCount feature not reported — not using it\n");
-    }
-    DebugLog("[MDI] Vulkan drawIndexedIndirectCount: %s\n",
-        _vkCmdDrawIndexedIndirectCount ? "supported" : "NOT supported (GPU count will use maxDrawCount)");
+    const MDIVulkanDeviceInfo& observed = MDIVulkanObservedDevice();
 
-    // Query multiDrawIndirect support from the physical device.
-    // vkCmdDrawIndexedIndirect with drawCount > 1 requires this feature.
-    // Without it, drawCount must be 0 or 1 (Vulkan spec).
-    auto vkGetPhysicalDeviceFeatures = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
-        instance.getInstanceProcAddr(instance.instance, "vkGetPhysicalDeviceFeatures"));
-    if (vkGetPhysicalDeviceFeatures && instance.physicalDevice)
+    // Optional: GPU-driven draw count (KHR/AMD extension, or core 1.2).
+    //
+    // When vkCreateDevice was observed we KNOW what Unity enabled and gate on
+    // facts. Without observation (plugin loaded after device init) we fall
+    // back to the old heuristics — with the caveat that some drivers (NVIDIA)
+    // return non-null vkGetDeviceProcAddr even for unenabled extensions, so
+    // the heuristic can be wrong; the observation path exists precisely to
+    // close that hole.
+    _vkCmdDrawIndexedIndirectCount = nullptr;
+    if (observed.observed)
     {
-        VkPhysicalDeviceFeatures features = {};
-        vkGetPhysicalDeviceFeatures(instance.physicalDevice, &features);
-        _multiDrawIndirectSupported = features.multiDrawIndirect == VK_TRUE;
-        DebugLog("[MDI] Vulkan multiDrawIndirect: %s\n",
-            _multiDrawIndirectSupported ? "supported" : "NOT supported (will use loop fallback)");
+        if (observed.drawIndirectCountExt)
+        {
+            _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+                getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountKHR"));
+            if (!_vkCmdDrawIndexedIndirectCount)
+                _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+                    getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountAMD"));
+        }
+        else if (observed.drawIndirectCountCore)
+        {
+            _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+                getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCount"));
+        }
     }
     else
     {
-        _multiDrawIndirectSupported = false;
-        DebugLog("[MDI] Could not query multiDrawIndirect, assuming not supported\n");
+        _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+            getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountKHR"));
+        if (!_vkCmdDrawIndexedIndirectCount)
+            _vkCmdDrawIndexedIndirectCount = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+                getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCountAMD"));
+        if (!_vkCmdDrawIndexedIndirectCount)
+        {
+            auto coreProc = reinterpret_cast<PFN_vkCmdDrawIndexedIndirectCount>(
+                getDeviceProcAddr(instance.device, "vkCmdDrawIndexedIndirectCount"));
+            if (coreProc && QueryDrawIndirectCountFeature(instance))
+                _vkCmdDrawIndexedIndirectCount = coreProc;
+        }
     }
+    DebugLog("[MDI] Vulkan drawIndexedIndirectCount: %s (%s)\n",
+        _vkCmdDrawIndexedIndirectCount ? "supported" : "NOT supported (GPU count will use maxDrawCount)",
+        observed.observed ? "from observed device creation" : "heuristic — device creation not observed");
+
+    // multiDrawIndirect: vkCmdDrawIndexedIndirect with drawCount > 1 requires
+    // the feature ENABLED at device creation. Observed truth when available,
+    // physical-device query otherwise (matches what Unity enables on every
+    // driver validated so far).
+    if (observed.observed)
+    {
+        _multiDrawIndirectSupported = observed.multiDrawIndirect;
+    }
+    else
+    {
+        auto vkGetPhysicalDeviceFeatures = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures>(
+            instance.getInstanceProcAddr(instance.instance, "vkGetPhysicalDeviceFeatures"));
+        if (vkGetPhysicalDeviceFeatures && instance.physicalDevice)
+        {
+            VkPhysicalDeviceFeatures features = {};
+            vkGetPhysicalDeviceFeatures(instance.physicalDevice, &features);
+            _multiDrawIndirectSupported = features.multiDrawIndirect == VK_TRUE;
+        }
+        else
+        {
+            _multiDrawIndirectSupported = false;
+        }
+    }
+    DebugLog("[MDI] Vulkan multiDrawIndirect: %s (%s)\n",
+        _multiDrawIndirectSupported ? "supported" : "NOT supported (will use loop fallback)",
+        observed.observed ? "from observed device creation" : "physical-device query");
 
     _initialized = true;
     DebugLog("[MDI] Vulkan backend initialized\n");
@@ -145,14 +177,29 @@ void MDIBackend_Vulkan::ConfigureEvents(IUnityInterfaces* unityInterfaces, int b
         // EnsureInside would restart it and lose pipeline/descriptor bindings.
         config.renderPassPrecondition = kUnityVulkanRenderPass_DontCare;
         config.graphicsQueueAccess = kUnityVulkanGraphicsQueueAccess_DontCare;
-        // EnsurePreviousFrameSubmission (bit 0) — keep set for proper frame ordering.
-        // ModifiesCommandBuffersState (bit 3) — NOT set: vkCmdDrawIndexedIndirect
-        // doesn't modify pipeline/descriptor/vertex buffer bindings.
-        config.flags = kUnityVulkanEventConfigFlag_EnsurePreviousFrameSubmission;
+        // ModifiesCommandBuffersState SET (the header's default). The draws
+        // themselves leave bindings untouched, but clearing the flag also
+        // stops Unity from re-validating its cached command-buffer state
+        // after the event.
+        config.flags = kUnityVulkanEventConfigFlag_EnsurePreviousFrameSubmission |
+                       kUnityVulkanEventConfigFlag_ModifiesCommandBuffersState;
         vulkan->ConfigureEvent(baseEventID + i, &config);
     }
 
-    DebugLog("[MDI] Configured Vulkan events [%d .. %d)\n", baseEventID, baseEventID + count);
+    // The prepare event sits one past the draw events and is the opposite
+    // case: it exists precisely to record a buffer barrier, which is illegal
+    // inside a render pass, so it must run outside one. Callers issue it
+    // right after the compute dispatch (or upload) that wrote the args.
+    {
+        UnityVulkanPluginEventConfig config = {};
+        config.renderPassPrecondition = kUnityVulkanRenderPass_EnsureOutside;
+        config.graphicsQueueAccess = kUnityVulkanGraphicsQueueAccess_DontCare;
+        config.flags = kUnityVulkanEventConfigFlag_EnsurePreviousFrameSubmission;
+        vulkan->ConfigureEvent(baseEventID + count, &config);
+    }
+
+    DebugLog("[MDI] Configured Vulkan events [%d .. %d), prepare event %d\n",
+        baseEventID, baseEventID + count, baseEventID + count);
 }
 
 void MDIBackend_Vulkan::Shutdown()
@@ -162,7 +209,32 @@ void MDIBackend_Vulkan::Shutdown()
     _vkCmdDrawIndexedIndirectCount = nullptr;
     _initialized = false;
     _multiDrawIndirectSupported = false;
-    DebugLog("[MDI] Vulkan backend shutdown\n");
+}
+
+// -----------------------------------------------------------------------
+// PrepareIndirectArgs — the ONLY place that records a barrier
+// -----------------------------------------------------------------------
+
+void MDIBackend_Vulkan::PrepareIndirectArgs(void* argsBuffer)
+{
+    if (!_initialized || !argsBuffer)
+        return;
+
+    // Issued from outside a render pass (the event is configured
+    // EnsureOutside), so Unity is free to record the buffer barrier here.
+    // Whatever wrote the args — a compute dispatch, a CPU upload — becomes
+    // visible to indirect fetch now, and ExecuteMDI's ObserveOnly resolve
+    // finds nothing left to do and leaves the render pass alone.
+    UnityVulkanBuffer resolved = {};
+    if (!_vulkan->AccessBuffer(
+        argsBuffer,
+        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+        VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+        kUnityVulkanResourceAccess_PipelineBarrier,
+        &resolved))
+    {
+        DebugLog("[MDI] Vulkan: AccessBuffer failed while preparing indirect args\n");
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -174,21 +246,27 @@ void MDIBackend_Vulkan::ExecuteMDI(const MDIParams& params)
     if (!_initialized || !params.argsBuffer || params.maxDrawCount == 0)
         return;
 
-    // On Vulkan, GetNativeBufferPtr() returns an opaque Unity handle, NOT a VkBuffer.
-    // Must use AccessBuffer() to resolve it to an actual VkBuffer and insert pipeline barriers.
+    // On Vulkan, GetNativeBufferPtr() returns an opaque Unity handle, NOT a
+    // VkBuffer — AccessBuffer resolves it. ObserveOnly, NOT PipelineBarrier:
+    // the write→indirect-read barrier is the prepare event's job
+    // (PrepareIndirectArgs), which runs outside a render pass where the
+    // barrier is legal. Requesting a barrier here — inside the pass — forces
+    // Unity to end/split the render pass to record it, which desyncs cached
+    // command buffers (observed in the editor as flickering black quads over
+    // UI) and costs a store/load of every attachment per split.
     UnityVulkanBuffer vkArgsBuffer = {};
     if (!_vulkan->AccessBuffer(
         params.argsBuffer,
-        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-        VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
-        kUnityVulkanResourceAccess_PipelineBarrier,
+        0, 0,
+        kUnityVulkanResourceAccess_ObserveOnly,
         &vkArgsBuffer))
     {
         DebugLog("[MDI] Vulkan: AccessBuffer failed for args buffer\n");
         return;
     }
 
-    // Resolve the GPU count buffer the same way, before querying recording state.
+    // Resolve the GPU count buffer the same way (ObserveOnly — callers must
+    // PrepareIndirectArgs the count buffer too when a compute writes it).
     const bool useGpuCount = (params.flags & MDI_FLAG_GPU_COUNT) != 0 &&
                              params.countBuffer != nullptr &&
                              _vkCmdDrawIndexedIndirectCount != nullptr;
@@ -198,12 +276,22 @@ void MDIBackend_Vulkan::ExecuteMDI(const MDIParams& params)
     {
         countResolved = _vulkan->AccessBuffer(
             params.countBuffer,
-            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-            VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
-            kUnityVulkanResourceAccess_PipelineBarrier,
+            0, 0,
+            kUnityVulkanResourceAccess_ObserveOnly,
             &vkCountBuffer);
         if (!countResolved)
             DebugLog("[MDI] Vulkan: AccessBuffer failed for count buffer, using maxDrawCount\n");
+    }
+
+    // Resolve the index buffer the batch was recorded against — only needed
+    // to verify the inherited state below actually belongs to our prime draw.
+    VkBuffer expectedIndexBuffer = VK_NULL_HANDLE;
+    if (params.indexBuffer)
+    {
+        UnityVulkanBuffer vkIndexBuffer = {};
+        if (_vulkan->AccessBuffer(params.indexBuffer, 0, 0,
+                kUnityVulkanResourceAccess_ObserveOnly, &vkIndexBuffer))
+            expectedIndexBuffer = vkIndexBuffer.buffer;
     }
 
     // AccessBuffer invalidates the recording state — must re-query
@@ -214,12 +302,42 @@ void MDIBackend_Vulkan::ExecuteMDI(const MDIParams& params)
     if (!state.commandBuffer) return;
 
     // Must be inside a render pass for draw commands.
-    // The prime DrawProceduralIndirect should have started one,
-    // and AccessBuffer with buffer-only barriers doesn't exit it.
     if (state.subPassIndex < 0)
     {
-        DebugLog("[MDI] Vulkan: not inside render pass after AccessBuffer, skipping\n");
+        DebugLog("[MDI] Vulkan: not inside render pass, skipping\n");
         return;
+    }
+
+    // The raw draw below INHERITS the pipeline and index buffer the prime
+    // draw left on this command buffer, so both must (a) exist and (b) be
+    // OURS. Two observed failure modes say they may not be:
+    //   - the editor skips prime draws whose shader variant is still
+    //     async-compiling → nothing bound → undefined behavior;
+    //   - RenderGraph + Native Render Pass can defer the plugin event out of
+    //     the recorded raster pass → the callback fires inside a LATER pass
+    //     with a FOREIGN pipeline and index buffer bound → valid but garbage
+    //     draws. The index-buffer identity check catches exactly that.
+    if (MDIVulkanStateTrackingActive())
+    {
+        VkPipeline boundPipeline = VK_NULL_HANDLE;
+        VkBuffer boundIndexBuffer = VK_NULL_HANDLE;
+        MDIVulkanStateQuery(state.commandBuffer, &boundPipeline, &boundIndexBuffer);
+
+        const bool noState = (boundPipeline == VK_NULL_HANDLE || boundIndexBuffer == VK_NULL_HANDLE);
+        const bool foreignIndex = !noState && expectedIndexBuffer != VK_NULL_HANDLE &&
+                                  boundIndexBuffer != expectedIndexBuffer;
+        if (noState || foreignIndex)
+        {
+            static std::atomic<uint32_t> s_skipCount{0};
+            const uint32_t skips = s_skipCount.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (skips == 1 || (skips & 0x3F) == 0)
+                DebugLog("[MDI] Vulkan: skipping batch — %s (pipeline=%p, boundIB=%p, expectedIB=%p; %u skipped so far)\n",
+                         noState ? "prime draw state missing"
+                                 : "foreign index buffer bound (event deferred into another pass?)",
+                         (void*)boundPipeline, (void*)boundIndexBuffer, (void*)expectedIndexBuffer,
+                         skips);
+            return;
+        }
     }
 
     const uint32_t stride = 20; // 5 * sizeof(uint32_t) = IndirectDrawIndexedArgs

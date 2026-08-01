@@ -29,7 +29,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && argsCount > 1 && MeshApiSupportedNatively)
+            if (_supported && argsCount > 1 && MeshApiSupportedNatively && PrimeDrawWillRecord(material, shaderPass))
             {
                 var meshIndexBuffer = EnsureMeshIndexBuffer(mesh);
                 IntPtr dataPtr = WriteParams(
@@ -71,7 +71,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && argsCount > 1 && MeshApiSupportedNatively)
+            if (_supported && argsCount > 1 && MeshApiSupportedNatively && PrimeDrawWillRecord(material, shaderPass))
             {
                 var meshIndexBuffer = EnsureMeshIndexBuffer(mesh);
                 IntPtr dataPtr = WriteParams(
@@ -115,7 +115,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && maxDrawCount > 1 && MeshApiSupportedNatively)
+            if (_supported && maxDrawCount > 1 && MeshApiSupportedNatively && PrimeDrawWillRecord(material, shaderPass))
             {
                 var meshIndexBuffer = EnsureMeshIndexBuffer(mesh);
                 IntPtr dataPtr = WriteParams(
@@ -161,7 +161,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && maxDrawCount > 1 && MeshApiSupportedNatively)
+            if (_supported && maxDrawCount > 1 && MeshApiSupportedNatively && PrimeDrawWillRecord(material, shaderPass))
             {
                 var meshIndexBuffer = EnsureMeshIndexBuffer(mesh);
                 IntPtr dataPtr = WriteParams(

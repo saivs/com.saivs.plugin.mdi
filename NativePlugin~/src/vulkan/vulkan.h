@@ -38,6 +38,8 @@ VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkBuffer)
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkImage)
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkRenderPass)
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkFramebuffer)
+VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkPipeline)
+VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkCommandPool)
 
 // Basic types
 typedef uint64_t VkDeviceSize;
@@ -211,10 +213,84 @@ typedef struct VkPhysicalDeviceFeatures2 {
     VkPhysicalDeviceFeatures features;
 } VkPhysicalDeviceFeatures2;
 
+// --- Additions for the command-buffer state tracker and the vkCreateDevice
+// --- observation hook (see MDIVulkanStateTracker.h).
+
+typedef enum VkResult {
+    VK_SUCCESS = 0,
+    VK_RESULT_MAX_ENUM = 0x7FFFFFFF
+} VkResult;
+
+typedef enum VkPipelineBindPoint {
+    VK_PIPELINE_BIND_POINT_GRAPHICS = 0,
+    VK_PIPELINE_BIND_POINT_COMPUTE = 1,
+    VK_PIPELINE_BIND_POINT_MAX_ENUM = 0x7FFFFFFF
+} VkPipelineBindPoint;
+
+typedef enum VkIndexType {
+    VK_INDEX_TYPE_UINT16 = 0,
+    VK_INDEX_TYPE_UINT32 = 1,
+    VK_INDEX_TYPE_MAX_ENUM = 0x7FFFFFFF
+} VkIndexType;
+
+// Opaque — only ever passed through, never dereferenced.
+typedef struct VkCommandBufferBeginInfo VkCommandBufferBeginInfo;
+typedef struct VkAllocationCallbacks VkAllocationCallbacks;
+typedef struct VkDeviceQueueCreateInfo VkDeviceQueueCreateInfo;
+
+// Read-only view of the full Vulkan 1.0 layout — the observation hook reads
+// enabled extensions/features from Unity's create info and passes it through
+// unmodified.
+typedef struct VkDeviceCreateInfo {
+    VkStructureType sType;
+    const void* pNext;
+    VkFlags flags;
+    uint32_t queueCreateInfoCount;
+    const VkDeviceQueueCreateInfo* pQueueCreateInfos;
+    uint32_t enabledLayerCount;
+    const char* const* ppEnabledLayerNames;
+    uint32_t enabledExtensionCount;
+    const char* const* ppEnabledExtensionNames;
+    const VkPhysicalDeviceFeatures* pEnabledFeatures;
+} VkDeviceCreateInfo;
+
+// Minimal view for walking pNext chains.
+typedef struct VkBaseInStructure {
+    VkStructureType sType;
+    const struct VkBaseInStructure* pNext;
+} VkBaseInStructure;
+
 // Function pointer types
 typedef void     (VKAPI_PTR *PFN_vkVoidFunction)(void);
 typedef PFN_vkVoidFunction (VKAPI_PTR *PFN_vkGetInstanceProcAddr)(VkInstance instance, const char* pName);
 typedef PFN_vkVoidFunction (VKAPI_PTR *PFN_vkGetDeviceProcAddr)(VkDevice device, const char* pName);
+
+typedef VkResult (VKAPI_PTR *PFN_vkCreateDevice)(
+    VkPhysicalDevice physicalDevice,
+    const VkDeviceCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkDevice* pDevice);
+
+typedef VkResult (VKAPI_PTR *PFN_vkBeginCommandBuffer)(
+    VkCommandBuffer commandBuffer,
+    const VkCommandBufferBeginInfo* pBeginInfo);
+
+typedef void (VKAPI_PTR *PFN_vkCmdBindPipeline)(
+    VkCommandBuffer commandBuffer,
+    VkPipelineBindPoint pipelineBindPoint,
+    VkPipeline pipeline);
+
+typedef void (VKAPI_PTR *PFN_vkCmdBindIndexBuffer)(
+    VkCommandBuffer commandBuffer,
+    VkBuffer buffer,
+    VkDeviceSize offset,
+    VkIndexType indexType);
+
+typedef void (VKAPI_PTR *PFN_vkFreeCommandBuffers)(
+    VkDevice device,
+    VkCommandPool commandPool,
+    uint32_t commandBufferCount,
+    const VkCommandBuffer* pCommandBuffers);
 
 typedef void (VKAPI_PTR *PFN_vkGetPhysicalDeviceFeatures)(
     VkPhysicalDevice physicalDevice,

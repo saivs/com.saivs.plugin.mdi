@@ -13,6 +13,7 @@ option(MDI_DEBUG_LOG "Enable native plugin debug logging" OFF)
 set(SOURCES
     src/MultiDrawIndirect.cpp
     src/MDIBackend_Vulkan.cpp
+    src/MDIVulkanStateTracker.cpp
     src/MDIBackend_GLES.cpp
 )
 
@@ -20,6 +21,7 @@ set(HEADERS
     src/MDILog.h
     src/MDIBackend.h
     src/MDIBackend_Vulkan.h
+    src/MDIVulkanStateTracker.h
     src/MDIBackend_GLES.h
     src/MDIBackend_Stub.h
     src/vulkan/vulkan.h

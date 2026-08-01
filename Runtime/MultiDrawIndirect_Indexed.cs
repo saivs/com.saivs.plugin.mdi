@@ -110,7 +110,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && argsCount > 1)
+            if (_supported && argsCount > 1 && PrimeDrawWillRecord(material, shaderPass))
             {
                 // Stage params into the ring buffer FIRST so we know which slot
                 // this draw owns. The slot is encoded in the prime's argsOffset
@@ -163,7 +163,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && maxDrawCount > 0)
+            if (_supported && maxDrawCount > 0 && PrimeDrawWillRecord(material, shaderPass))
             {
                 // Same flow as the CPU-count overload: stage params (including
                 // the GPU count buffer) into the ring, then issue the prime

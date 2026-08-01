@@ -15,6 +15,31 @@ namespace Saivs.Graphics.Core.MDI
     public static partial class MultiDrawIndirect
     {
         // -----------------------------------------------------------------------
+        // Prepare event — RenderGraph variants. Call right after the compute
+        // dispatch that wrote the args buffer (compute or unsafe pass), so the
+        // write→indirect-read barrier is recorded outside any render pass.
+        // See PrepareIndirectArgs(CommandBuffer, GraphicsBuffer).
+        // -----------------------------------------------------------------------
+
+        /// <inheritdoc cref="PrepareIndirectArgs(CommandBuffer, GraphicsBuffer)"/>
+        public static void PrepareIndirectArgs(this ComputeCommandBuffer cmd, GraphicsBuffer argsBuffer)
+        {
+            IntPtr dataPtr = BeginPrepareIndirectArgs(argsBuffer);
+            if (dataPtr == IntPtr.Zero)
+                return;
+            cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + PREPARE_ARGS_EVENT, dataPtr);
+        }
+
+        /// <inheritdoc cref="PrepareIndirectArgs(CommandBuffer, GraphicsBuffer)"/>
+        public static void PrepareIndirectArgs(this UnsafeCommandBuffer cmd, GraphicsBuffer argsBuffer)
+        {
+            IntPtr dataPtr = BeginPrepareIndirectArgs(argsBuffer);
+            if (dataPtr == IntPtr.Zero)
+                return;
+            cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + PREPARE_ARGS_EVENT, dataPtr);
+        }
+
+        // -----------------------------------------------------------------------
         // RasterCommandBuffer extension
         // -----------------------------------------------------------------------
         public static void MultiDrawIndexedIndirect(
@@ -30,7 +55,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && argsCount > 1)
+            if (_supported && argsCount > 1 && PrimeDrawWillRecord(material, shaderPass))
             {
                 IntPtr dataPtr = WriteParams(bufferWithArgs, indexBuffer, argsStartIndex, argsCount, topology, indexFormat: 1, flags: 0, out int slot);
 
@@ -73,7 +98,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && argsCount > 1)
+            if (_supported && argsCount > 1 && PrimeDrawWillRecord(material, shaderPass))
             {
                 IntPtr dataPtr = WriteParams(bufferWithArgs, indexBuffer, argsStartIndex, argsCount, topology, indexFormat: 1, flags: 0, out int slot);
 
@@ -115,7 +140,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && maxDrawCount > 0)
+            if (_supported && maxDrawCount > 0 && PrimeDrawWillRecord(material, shaderPass))
             {
                 IntPtr dataPtr = WriteParams(bufferWithArgs, indexBuffer, argsStartIndex, maxDrawCount, topology, indexFormat: 1, flags: MDI_FLAG_GPU_COUNT, out int slot,
                     countBuffer: drawCountBuffer, countOffsetBytes: drawCountByteOffset);
@@ -159,7 +184,7 @@ namespace Saivs.Graphics.Core.MDI
         {
             EnsureInitialized();
 
-            if (_supported && maxDrawCount > 0)
+            if (_supported && maxDrawCount > 0 && PrimeDrawWillRecord(material, shaderPass))
             {
                 IntPtr dataPtr = WriteParams(bufferWithArgs, indexBuffer, argsStartIndex, maxDrawCount, topology, indexFormat: 1, flags: MDI_FLAG_GPU_COUNT, out int slot,
                     countBuffer: drawCountBuffer, countOffsetBytes: drawCountByteOffset);

@@ -319,5 +319,77 @@ namespace Saivs.Graphics.Core.MDI
 
             return (IntPtr)((NativeMDIParams*)_paramsRing.GetUnsafeReadOnlyPtr() + slot);
         }
+
+        // -----------------------------------------------------------------
+        // Prepare event — write→indirect-read barrier, outside render passes
+        // -----------------------------------------------------------------
+
+        // Event index of the prepare event within the plugin's range — one
+        // past the per-ring-slot draw events (matches native MDI_MAX_PENDING).
+        private const int PREPARE_ARGS_EVENT = MAX_PENDING;
+
+        /// <summary>
+        /// Records the barrier that makes GPU writes to <paramref name="argsBuffer"/>
+        /// visible to indirect-draw fetch. Call it right AFTER the compute
+        /// dispatch (or upload) that wrote the args and BEFORE the render pass
+        /// that consumes them via MultiDraw*Indirect — once per buffer per
+        /// frame is enough. On Vulkan this is the only place the barrier can
+        /// be recorded without splitting a render pass (a split corrupts
+        /// cached state and stalls the GPU); the draw itself never records
+        /// barriers. No-op on backends that don't need it and when the native
+        /// plugin is unavailable.
+        /// </summary>
+        public static void PrepareIndirectArgs(this CommandBuffer cmd, GraphicsBuffer argsBuffer)
+        {
+            IntPtr dataPtr = BeginPrepareIndirectArgs(argsBuffer);
+            if (dataPtr == IntPtr.Zero)
+                return;
+            cmd.IssuePluginEventAndData(_renderEventAndDataFunc, _baseEventID + PREPARE_ARGS_EVENT, dataPtr);
+        }
+
+        // Stages the buffer into a ring slot; returns IntPtr.Zero when there
+        // is nothing to do (unsupported, or no native event function).
+        private static unsafe IntPtr BeginPrepareIndirectArgs(GraphicsBuffer argsBuffer)
+        {
+            EnsureInitialized();
+
+            if (!_supported || argsBuffer == null || _renderEventAndDataFunc == IntPtr.Zero)
+                return IntPtr.Zero;
+
+            int slot = MDI_AllocSlot();
+            _paramsRing[slot] = new NativeMDIParams
+            {
+                argsBuffer = argsBuffer.GetNativeBufferPtr(),
+                _pad = MDI_RING_MAGIC,
+            };
+            return (IntPtr)((NativeMDIParams*)_paramsRing.GetUnsafeReadOnlyPtr() + slot);
+        }
+
+        // -----------------------------------------------------------------
+        // Editor async-compile gate
+        // -----------------------------------------------------------------
+
+        // In the editor, async shader compilation makes Unity SKIP (or swap
+        // for a placeholder) any draw whose variant is still compiling. The
+        // prime draw is what leaves pipeline/index-buffer state on the
+        // command buffer for the native multi-draw — a skipped prime means
+        // the native draws inherit nothing, which is undefined behavior on
+        // Vulkan (the native backend also refuses those draws). Use the loop
+        // path for such frames: Unity renders the placeholder there itself,
+        // and the batch returns to MDI once the pass is compiled.
+        private static bool PrimeDrawWillRecord(Material material, int shaderPass)
+        {
+#if UNITY_EDITOR
+            if (material == null)
+                return false;
+            int pass = shaderPass < 0 ? 0 : shaderPass;
+            if (UnityEditor.ShaderUtil.IsPassCompiled(material, pass))
+                return true;
+            UnityEditor.ShaderUtil.CompilePass(material, pass); // kick async compile
+            return false;
+#else
+            return true;
+#endif
+        }
     }
 }

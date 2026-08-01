@@ -39,6 +39,15 @@ struct IMDIBackend
     // Execute multi-draw indirect using params from the given slot
     virtual void ExecuteMDI(const MDIParams& params) = 0;
 
+    // Record the write→indirect-read barrier for an args buffer. Issued via
+    // the dedicated prepare event AFTER whatever wrote the args (a compute
+    // dispatch, a CPU upload) and OUTSIDE any render pass — the only place a
+    // buffer barrier is legal on Vulkan. ExecuteMDI itself never records
+    // barriers: requesting one mid-render-pass forces the engine to split
+    // the pass, which corrupts cached state and costs bandwidth.
+    // No-op on backends that don't need it.
+    virtual void PrepareIndirectArgs(void* argsBuffer) { (void)argsBuffer; }
+
     // Returns true if the backend is ready to issue MDI calls
     virtual bool IsSupported() const = 0;
 
