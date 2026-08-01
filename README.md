@@ -138,6 +138,15 @@ MultiDrawIndirect.MaxInstanceCount = 1_000_000;
 uint current = MultiDrawIndirect.MaxInstanceCount;
 ```
 
+### Prepare Arguments Buffer
+
+After filling the argument buffer in the compute shader, it needs to be prepared. On some APIs, Unity doesn't see the args barrier without this, and so MultiDrawIndirect may render with incorrect data.
+
+```csharp
+cmd.DispatchCompute(...);
+cmd.PrepareIndirectArgs(argsBuffer);
+```
+
 ### Mesh — `cmd.MultiDrawMeshIndirect`
 
 Pass a Unity `Mesh` directly. Vertices come through the standard input assembler so the shader can use the regular `POSITION` / `NORMAL` / `TEXCOORD0` / etc.
