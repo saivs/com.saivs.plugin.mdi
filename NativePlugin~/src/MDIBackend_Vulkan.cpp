@@ -177,12 +177,15 @@ void MDIBackend_Vulkan::ConfigureEvents(IUnityInterfaces* unityInterfaces, int b
         // EnsureInside would restart it and lose pipeline/descriptor bindings.
         config.renderPassPrecondition = kUnityVulkanRenderPass_DontCare;
         config.graphicsQueueAccess = kUnityVulkanGraphicsQueueAccess_DontCare;
-        // ModifiesCommandBuffersState SET (the header's default). The draws
-        // themselves leave bindings untouched, but clearing the flag also
-        // stops Unity from re-validating its cached command-buffer state
-        // after the event.
-        config.flags = kUnityVulkanEventConfigFlag_EnsurePreviousFrameSubmission |
-                       kUnityVulkanEventConfigFlag_ModifiesCommandBuffersState;
+        // ModifiesCommandBuffersState NOT set — deliberately, twice over:
+        //  - the callback records nothing but the draw itself (buffer
+        //    resolves are ObserveOnly), which inherits state and changes no
+        //    bindings;
+        //  - with the flag SET, Unity re-applies its cached state after
+        //    every event, and on Android that re-application loses the
+        //    surface pre-rotation correction — the frame renders squished
+        //    into half the screen and shifted.
+        config.flags = kUnityVulkanEventConfigFlag_EnsurePreviousFrameSubmission;
         vulkan->ConfigureEvent(baseEventID + i, &config);
     }
 
