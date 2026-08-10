@@ -6,28 +6,28 @@ A native plugin that brings true **Multi-Draw Indirect (MDI)** to Unity.
 
 ## What is Multi-Draw Indirect?
 
-A **draw call** is one instruction to the GPU: "render this object with this material". Each one has real CPU cost — the engine has to validate state, build a command, and submit it to the graphics driver.
+A **draw call** is one instruction to the GPU: "render this object with this material". Each one has real CPU cost: the engine has to validate state, build a command, and submit it to the graphics driver.
 
-A "small" scene easily hits **2,000–3,000 draw calls per frame**, even with very few objects on screen. Each visible object isn't drawn once — it's drawn several times per frame: once for the main image, once or twice more for shadows, often again for a depth pre-pass, plus extra passes for transparency and post-processing. Add LODs (different mesh detail at different distances) and the count grows fast.
+A "small" scene easily hits **2,000-3,000 draw calls per frame**, even with very few objects on screen. Each visible object is drawn several times per frame: once for the main image, once or twice more for shadows, often again for a depth pre-pass, plus extra passes for transparency and post-processing. Add LODs (different mesh detail at different distances) and the count grows fast.
 
-Even on a fast desktop CPU with Unity's built-in batching, **1,000 draw calls can cost over 1 ms of CPU time per frame**. At 60 fps you have a 16.6 ms budget for *everything* — physics, AI, scripts, rendering — so 1 ms just submitting draws to the GPU is a real problem.
+Even on a fast desktop CPU with Unity's built-in batching, **1,000 draw calls can cost over 1 ms of CPU time per frame**. At 60 fps you have a 16.6 ms budget for everything (physics, AI, scripts, rendering), so 1 ms spent just submitting draws to the GPU is a real problem.
 
-**Multi-Draw Indirect (MDI)** solves this by replacing N draw calls with one. You write the parameters for all N draws into a single GPU buffer, then make **one** call that tells the GPU "look in this buffer and run whatever draws you find". The GPU does the dispatch itself — there's no per-draw CPU overhead. This is the technique modern engines like Unreal's Nanite and Frostbite use to render millions of objects without the CPU collapsing under draw-call cost.
+**Multi-Draw Indirect (MDI)** replaces N draw calls with one. You write the parameters for all N draws into a single GPU buffer, then make one call that tells the GPU to run every draw it finds in that buffer. The GPU does the dispatch itself, with no per-draw CPU overhead. This is how engines like Unreal (Nanite) and Frostbite render millions of objects without drowning the CPU in draw-call cost.
 
 ## Why this plugin?
 
-Modern GPU-driven rendering pipelines rely on Multi-Draw Indirect to batch thousands of draw calls into a single GPU command. Unity does **not** expose MDI in any form:
+Modern GPU-driven rendering pipelines rely on Multi-Draw Indirect to batch thousands of draw calls into a single GPU command. Unity does not expose MDI in any form:
 
-- `Graphics.RenderPrimitivesIndexedIndirect / Graphics.RenderMeshIndirect` is the closest built-in alternative, but it is **not** MDI — it issues individual draw calls on the CPU side and, critically, **cannot be used inside CommandBuffers**, making it unusable in scriptable render pipelines and render graph workflows.
-- `CommandBuffer.DrawProceduralIndirect / CommandBuffer.DrawMeshInstancedIndirect` supports only a single indirect draw per call. Issuing it in a loop ("ProceduralIndirect loop") works but scales poorly — each call has full CPU overhead of state validation, command recording, and managed-to-native transitions.
+- `Graphics.RenderPrimitivesIndexedIndirect / Graphics.RenderMeshIndirect` is the closest built-in alternative, but it is not MDI: it issues individual draw calls on the CPU side. It also cannot be used inside CommandBuffers, which makes it unusable in scriptable render pipelines and render graph workflows.
+- `CommandBuffer.DrawProceduralIndirect / CommandBuffer.DrawMeshInstancedIndirect` supports only a single indirect draw per call. Issuing it in a loop ("ProceduralIndirect loop") works but scales poorly: each call pays the full CPU cost of state validation, command recording, and managed-to-native transitions.
 
-This plugin solves the problem by injecting a single native MDI command directly into Unity's graphics command stream via `IssuePluginEventAndData`, providing **true hardware-level batching** with minimal CPU cost.
+This plugin injects a single native MDI command directly into Unity's graphics command stream via `IssuePluginEventAndData`. The result is true hardware-level batching with minimal CPU cost.
 
 ## Supported Platforms
 
 | Graphics API | Status | Backend |
 |---|---|---|
-| D3D11 | ✅ Supported | (Nvidia)NvAPI `DrawIndexedInstancedIndirect` / loop fallback |
+| D3D11 | ✅ Supported | NvAPI (NVIDIA) `DrawIndexedInstancedIndirect` / loop fallback |
 | D3D12 | ✅ Supported | `ExecuteIndirect` via `CommandRecordingState` |
 | Vulkan | ✅ Supported | `vkCmdDrawIndexedIndirect` (multi-draw or loop fallback) |
 | OpenGL Core | ✅ Supported | `glMultiDrawElementsIndirect` |
@@ -37,7 +37,7 @@ This plugin solves the problem by injecting a single native MDI command directly
 
 ### Operating Systems
 
-The package ships prebuilt binaries for every supported OS — no manual compilation needed:
+The package ships prebuilt binaries for every supported OS, no manual compilation needed:
 
 | OS | Binary | Graphics APIs |
 |---|---|---|
@@ -47,7 +47,7 @@ The package ships prebuilt binaries for every supported OS — no manual compila
 | Android (arm64-v8a, armeabi-v7a) | `libGfxPluginMDI.so` | Vulkan, OpenGL ES |
 | Web | `MDIBackend_WebGPU.jslib` | WebGPU |
 
-The Linux binary targets glibc 2.34+ (Ubuntu 22.04 and newer — Unity 6's Linux baseline) with the C++ runtime linked statically, so it has no dependencies beyond libc. To rebuild it from source, run `NativePlugin~/build_linux.sh` on any Linux machine or container.
+The Linux binary targets glibc 2.34+ (Ubuntu 22.04 and newer, Unity 6's Linux baseline) with the C++ runtime linked statically, so it has no dependencies beyond libc. To rebuild it from source, run `NativePlugin~/build_linux.sh` on any Linux machine or container.
 
 ## Performance
 
@@ -105,9 +105,9 @@ Measured as total `PlayerLoop` time (not just command submission) in the build, 
 ## Limitations
 
 - **D3D11 + RenderDoc**: The plugin uses NvAPI, which can cause Unity to crash when RenderDoc attempts to inject at runtime. To avoid this, attach RenderDoc **at Unity startup** (launch Unity from RenderDoc) rather than connecting mid-session.
-- **D3D11 + AMD GPUs**: D3D11 does not have a native MDI API. On NVIDIA, this is solved via NvAPI, which can attach to an already-created D3D11 device. AMD has an equivalent extension in AGS (`agsDriverExtensionsDX11_MultiDrawIndexedInstancedIndirect`), but AGS requires the D3D11 device to be created through `agsDriverExtensionsDX11_CreateDevice` — since Unity creates the device itself, AGS extensions cannot be enabled retroactively. Because of this (and lack of AMD hardware for testing), MDI on D3D11 + AMD is not currently supported. AMD GPUs are fully supported under D3D12, Vulkan, and OpenGL.
-- **Consoles**: The plugin has been tested on desktop Windows, Linux, macOS, Web (WebGPU in Chromium-based browsers), and mobile devices (iOS; Android with Adreno and Mali GPUs). It has not been verified on consoles (PlayStation, Xbox, Switch) — support there is not guaranteed.
-- **Mobile hardware multi-draw coverage**: On iOS, Metal indirect draws (the mechanism behind the swizzling backend) require A9 hardware or newer (iPhone 6s, 2015+). On Android, true hardware MDI depends on the GPU's Vulkan `multiDrawIndirect` feature: **Qualcomm Adreno** exposes it, while **ARM Mali** generally does not (only the newest Immortalis-class drivers report it). The same split applies under OpenGL ES: `GL_EXT_multi_draw_indirect` is available on Adreno but not on Mali. On GPUs without the feature nothing breaks — the plugin detects it at init and transparently degrades to a **native loop** (`vkCmdDrawIndexedIndirect` with `drawCount = 1` per command, recorded directly into Unity's command buffer): still one plugin event per batch and far cheaper than the managed C# loop, just not a single hardware command.
+- **D3D11 + AMD GPUs**: D3D11 does not have a native MDI API. On NVIDIA, this is solved via NvAPI, which can attach to an already-created D3D11 device. AMD has an equivalent extension in AGS (`agsDriverExtensionsDX11_MultiDrawIndexedInstancedIndirect`), but AGS requires the D3D11 device to be created through `agsDriverExtensionsDX11_CreateDevice`. Unity creates the device itself, so AGS extensions cannot be enabled retroactively. Because of this (and lack of AMD hardware for testing), MDI on D3D11 + AMD is not currently supported. AMD GPUs are fully supported under D3D12, Vulkan, and OpenGL.
+- **Consoles**: The plugin has been tested on desktop Windows, Linux, macOS, Web (WebGPU in Chromium-based browsers), and mobile devices (iOS; Android with Adreno and Mali GPUs). It has not been verified on consoles (PlayStation, Xbox, Switch), so support there is not guaranteed.
+- **Mobile hardware multi-draw coverage**: On iOS, Metal indirect draws (the mechanism behind the swizzling backend) require A9 hardware or newer (iPhone 6s, 2015+). On Android, true hardware MDI depends on the GPU's Vulkan `multiDrawIndirect` feature: **Qualcomm Adreno** exposes it, while **ARM Mali** generally does not (only the newest Immortalis-class drivers report it). The same split applies under OpenGL ES: `GL_EXT_multi_draw_indirect` is available on Adreno but not on Mali. On GPUs without the feature nothing breaks: the plugin detects it at init and falls back to a **native loop** (`vkCmdDrawIndexedIndirect` with `drawCount = 1` per command, recorded directly into Unity's command buffer). That is still one plugin event per batch and far cheaper than the managed C# loop, just not a single hardware command.
 - **Identity buffer instance limit (D3D11/D3D12/OpenGL/GLES)**: The per-instance identity buffer defaults to 65,536 entries. For any draw command in an MDI batch, `startInstance + instanceCount` must not exceed this value. Use `MultiDrawIndirect.MaxInstanceCount` to increase or decrease the limit at runtime. This limitation does not apply to Vulkan.
 
 ## Installation
@@ -132,7 +132,7 @@ using Saivs.Graphics.Core.MDI;
 ### Identity Buffer
 ```csharp
 // Increase the limit to 1,000,000 instances (D3D11/D3D12/OpenGL)
-// See Documentation~/DeepDive-D3D.md — "Per-Instance Identity Buffer"
+// See Documentation~/DeepDive-D3D.md, section "Per-Instance Identity Buffer"
 MultiDrawIndirect.MaxInstanceCount = 1_000_000;
 // Query the current limit
 uint current = MultiDrawIndirect.MaxInstanceCount;
@@ -147,7 +147,7 @@ cmd.DispatchCompute(...);
 cmd.PrepareIndirectArgs(argsBuffer);
 ```
 
-### Mesh — `cmd.MultiDrawMeshIndirect`
+### Mesh: `cmd.MultiDrawMeshIndirect`
 
 Pass a Unity `Mesh` directly. Vertices come through the standard input assembler so the shader can use the regular `POSITION` / `NORMAL` / `TEXCOORD0` / etc.
 
@@ -162,11 +162,11 @@ cmd.MultiDrawMeshIndirect(
     argsCount:      drawCount
 );
 ```
-That's it — one call replaces the entire draw loop. When the native plugin is available, all draws are batched into a single MDI command. 
+One call replaces the entire draw loop. When the native plugin is available, all draws are batched into a single MDI command. 
 
-The `argsBuffer` layout is identical to `MultiDrawIndexedIndirect` ([GraphicsBuffer.IndirectDrawIndexedArgs](https://docs.unity3d.com/6000.4/Documentation/ScriptReference/GraphicsBuffer.IndirectDrawIndexedArgs.html)). Each entry's `startIndex` / `baseVertexIndex` directly drives which slice of the mesh's index/vertex buffer is read for that draw — letting you scatter different shapes across the batch by combining several meshes into one and indexing them through args. Multi-submesh meshes aren't addressed via a `submeshIndex` parameter; encode whatever slice you need directly through `startIndex` / `baseVertexIndex` / `indexCountPerInstance`.
+The `argsBuffer` layout is identical to `MultiDrawIndexedIndirect` ([GraphicsBuffer.IndirectDrawIndexedArgs](https://docs.unity3d.com/6000.4/Documentation/ScriptReference/GraphicsBuffer.IndirectDrawIndexedArgs.html)). Each entry's `startIndex` / `baseVertexIndex` directly drives which slice of the mesh's index/vertex buffer is read for that draw, so you can scatter different shapes across the batch by combining several meshes into one and indexing them through args. There is no `submeshIndex` parameter for multi-submesh meshes; encode the slice you need directly through `startIndex` / `baseVertexIndex` / `indexCountPerInstance`.
 
-Matching vertex shader — vertex data arrives through the standard semantics:
+Matching vertex shader (vertex data arrives through the standard semantics):
 
 ```hlsl
 HLSLPROGRAM
@@ -189,7 +189,7 @@ VertexOutput vert(Attributes input, MDI_INSTANCE_ID_PARAMETER)
 ENDHLSL
 ```
 
-### Indexed / procedural — `cmd.MultiDrawIndexedIndirect`
+### Indexed / procedural: `cmd.MultiDrawIndexedIndirect`
 
 The shader pulls vertex data from a `StructuredBuffer` indexed by `SV_VertexID`.
 
@@ -207,7 +207,7 @@ cmd.MultiDrawIndexedIndirect(
 );
 ```
 
-Matching vertex shader — vertex data fetched manually from a `StructuredBuffer` via `SV_VertexID`:
+Matching vertex shader (vertex data is fetched manually from a `StructuredBuffer` via `SV_VertexID`):
 
 ```hlsl
 HLSLPROGRAM
@@ -225,9 +225,9 @@ VertexOutput vert(uint vertexID : SV_VertexID, MDI_INSTANCE_ID_PARAMETER)
 ENDHLSL
 ```
 
-### GPU-driven draw count — `cmd.MultiDrawIndexedIndirect` (count-buffer overload)
+### GPU-driven draw count: `cmd.MultiDrawIndexedIndirect` (count-buffer overload)
 
-An overload of `MultiDrawIndexedIndirect` where the draw count is read by the GPU from a `GraphicsBuffer` (e.g. written by a culling compute shader via an atomic counter) instead of being fixed on the CPU — no readback or CPU sync required:
+An overload of `MultiDrawIndexedIndirect` where the draw count is read by the GPU from a `GraphicsBuffer` (e.g. written by a culling compute shader via an atomic counter) instead of being fixed on the CPU. No readback or CPU sync required:
 
 ```csharp
 cmd.MultiDrawIndexedIndirect(
@@ -252,11 +252,11 @@ Backend behaviour:
 | Vulkan | `vkCmdDrawIndexedIndirectCount` (core 1.2 / `KHR` / `AMD`), loop fallback otherwise |
 | OpenGL / GLES | `glMultiDrawElementsIndirectCount` (GL 4.6 / `ARB_indirect_parameters`), loop fallback otherwise |
 | WebGPU | `multiDrawIndexedIndirect` count-buffer argument (experimental multi-draw feature) |
-| D3D11 / Metal | No native count API — executes `maxDrawCount` draws |
+| D3D11 / Metal | No native count API, executes `maxDrawCount` draws |
 
-On backends without a native count mechanism (and in every loop fallback), `maxDrawCount` draws are executed, so the compute shader **must zero the `instanceCount` of unused args entries** — the extra draws then produce no work. Following that rule makes behaviour identical on all backends.
+On backends without a native count mechanism (and in every loop fallback), `maxDrawCount` draws are executed, so the compute shader must zero the `instanceCount` of unused args entries; the extra draws then produce no work. Following that rule makes behaviour identical on all backends.
 
-**Backend support.** True single-call MDI through this API runs on every supported backend (D3D11, D3D12, Vulkan, Metal, WebGPU, OpenGL Core, OpenGL ES). On Metal, Vulkan and WebGPU the user mesh doesn't need a `TEXCOORD7` element — `MDI.hlsl` resolves `MDI_INSTANCE_ID` through `SV_InstanceID`. On D3D11 and D3D12 the native plugin reflects the user shader's vertex bytecode and patches the input layout / PSO at creation time to add a per-instance `TEXCOORD7 → identity buffer` element on slot 15, leaving the user mesh's vertex buffers untouched. On OpenGL / OpenGL ES the plugin clones Unity's mesh VAO into its own VAO and adds the same per-instance `TEXCOORD7` binding, with a small fingerprint-keyed cache so repeated draws of the same mesh skip the cloning. The mesh's `indexBufferTarget` is augmented with `Raw` automatically the first time it's seen, so `mesh.GetIndexBuffer()` returns a buffer the native plugin can address.
+**Backend support.** True single-call MDI through this API runs on every supported backend (D3D11, D3D12, Vulkan, Metal, WebGPU, OpenGL Core, OpenGL ES). On Metal, Vulkan and WebGPU the user mesh doesn't need a `TEXCOORD7` element, because `MDI.hlsl` resolves `MDI_INSTANCE_ID` through `SV_InstanceID`. On D3D11 and D3D12 the native plugin reflects the user shader's vertex bytecode and patches the input layout / PSO at creation time to add a per-instance `TEXCOORD7 → identity buffer` element on slot 15, leaving the user mesh's vertex buffers untouched. On OpenGL / OpenGL ES the plugin clones Unity's mesh VAO into its own VAO and adds the same per-instance `TEXCOORD7` binding, with a small fingerprint-keyed cache so repeated draws of the same mesh skip the cloning. The mesh's `indexBufferTarget` is augmented with `Raw` automatically the first time it's seen, so `mesh.GetIndexBuffer()` returns a buffer the native plugin can address.
 
 ### `MDI.hlsl` macros
 
@@ -264,8 +264,8 @@ Both APIs above share two macros that handle cross-platform instance ID resoluti
 
 | Macro | Purpose |
 |---|---|
-| `MDI_INSTANCE_ID_PARAMETER` | Place in vertex shader signature — expands to the correct platform-specific parameter |
-| `MDI_INSTANCE_ID` | Use in vertex shader body — resolves to the global instance index across all draw commands |
+| `MDI_INSTANCE_ID_PARAMETER` | Place in the vertex shader signature; expands to the correct platform-specific parameter |
+| `MDI_INSTANCE_ID` | Use in the vertex shader body; resolves to the global instance index across all draw commands |
 
 The macros expand differently depending on the platform and compile-time defines:
 
@@ -280,9 +280,9 @@ See the included [sample shader](Samples~/MDITest/Shaders/MDITestShader.shader) 
 
 ## Technical Deep Dive
 
-There was no single central problem to solve to bring MDI to every graphics API — each backend hit its own wall, and on several platforms the real issue wasn't a missing feature but that support looked outright **impossible** at first glance: Unity exposes no way to modify pipeline state on D3D, on Metal the command encoder is already dead by the time a plugin event fires, and on the Web there is no native plugin interface for WebGPU at all. Each of those walls turned out to have a way around it — inline hooking, method swizzling, or prototype patching.
+Each backend hit its own wall. On several platforms MDI support looked impossible at first: Unity exposes no way to modify pipeline state on D3D, on Metal the command encoder is already dead by the time a plugin event fires, and on the Web there is no native plugin interface for WebGPU at all. Every wall had a way around it: inline hooking on D3D, method swizzling on Metal, prototype patching on the Web.
 
-One recurring (but not universal) sub-problem is obtaining a correct **global instance index** — one that uniquely identifies each instance across all draw commands in a single MDI batch. Vulkan hands it out for free (`gl_InstanceIndex` includes `firstInstance`), WebGPU follows the same semantics, and D3D11/D3D12/OpenGL zero out `SV_InstanceID` on every draw command, each needing its own workaround.
+A recurring (but not universal) sub-problem is obtaining a correct global instance index, one that uniquely identifies each instance across all draw commands in a single MDI batch. Vulkan hands it out for free (`gl_InstanceIndex` includes `firstInstance`) and WebGPU follows the same semantics, but D3D11/D3D12/OpenGL zero out `SV_InstanceID` on every draw command, so each of them needs its own workaround.
 
 The full story for each backend:
 
